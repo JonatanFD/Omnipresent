@@ -16,10 +16,10 @@ async fn main() -> io::Result<()> {
     let (tx, mut rx) = mpsc::channel::<TrackpadMessage>(100);
 
     std::thread::spawn(move || {
-        // 1. Usamos el Factory para obtener la estrategia correcta según el OS
+        // 1. Use the MouseStrategyFactory to get the correct strategy for the OS
         let strategy = MouseStrategyFactory::create();
 
-        // 2. Inyectamos la estrategia en el controlador
+        // 2. Inject the strategy into the controller
         let mut controller = InputController::new(strategy);
 
         let mut last_timestamp = 0;

@@ -1,7 +1,7 @@
 use crate::mouse::strategy::MouseStrategy;
 
 pub struct InputController {
-    // Guardamos la estrategia dinámicamente
+    // Save the strategy dynamically
     strategy: Box<dyn MouseStrategy>,
 }
 
