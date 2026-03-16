@@ -6,10 +6,11 @@ As Omnipresent is a UDP server for real-time inputs such as mouse movement. We n
 The core of the messaging must envolve the following properties
 
 - Device Name: It is the name of the device sending the input.
-- Position x: It is the x coordinate of the mouse position.
-- Position y: It is the y coordinate of the mouse position.
+- Delta x: It is the x coordinate of the mouse position.
+- Delta y: It is the y coordinate of the mouse position.
 - Action: It is the action performed by the device (e.g. click, scroll).
 - Phase: It is the phase of the action (e.g. start, move, end).
+- Timestamp: It is the timestamp of the action. We can prevent use this to ignore old actions.
 
 There are many actions and all of these actions has unique properties to describe them.
 
