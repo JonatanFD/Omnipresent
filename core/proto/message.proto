@@ -32,4 +32,6 @@ message TrackpadMessage {
   PhaseType phase = 5;
 
   uint64 timestamp = 6;
+
+  uint32 auth_token = 7;
 }
