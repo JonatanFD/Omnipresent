@@ -8,23 +8,25 @@ message TrackpadMessage {
   float delta_y = 3;
 
   enum ActionType {
-    RIGTH_CLICK = 0;
-    LEFT_CLICK = 1;
-    DOUBLE_CLICK = 2;
-    HORIZONTAL_SCROLL = 3;
-    VERTICAL_SCROLL = 4;
-    SWIPE_LEFT = 5;
-    SWIPE_RIGHT = 6;
-    SWIPE_UP = 7;
-    SWIPE_DOWN = 8;
+    NO_ACTION = 0;
+    RIGHT_CLICK = 1;
+    LEFT_CLICK = 2;
+    DOUBLE_CLICK = 3;
+    HORIZONTAL_SCROLL = 4;
+    VERTICAL_SCROLL = 5;
+    SWIPE_LEFT = 6;
+    SWIPE_RIGHT = 7;
+    SWIPE_UP = 8;
+    SWIPE_DOWN = 9;
   }
 
   ActionType action = 4;
 
   enum PhaseType {
-    START = 0;
-    UPDATE = 1;
-    END = 2;
+    NONE = 0;
+    START = 1;
+    UPDATE = 2;
+    END = 3;
   }
 
   PhaseType phase = 5;
