@@ -28,6 +28,7 @@ fun ScannerScreen(onQrScanned: (String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var hasCameraPermission by remember { mutableStateOf(false) }
+    var hasScanned by remember { mutableStateOf(false) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -72,7 +73,10 @@ fun ScannerScreen(onQrScanned: (String) -> Unit) {
                                         for (barcode in barcodes) {
                                             barcode.rawValue?.let { qrValue ->
                                                 if (qrValue.startsWith("omnipresent://")) {
-                                                    onQrScanned(qrValue)
+                                                    if (!hasScanned) {
+                                                        hasScanned = true
+                                                        onQrScanned(qrValue)
+                                                    }
                                                 }
                                             }
                                         }
