@@ -1,23 +1,20 @@
-use log::{debug, info};
+use crate::mouse::strategy::MouseStrategy;
 
 pub struct InputController {
-    // Here we will later add the struct from the library you choose (e.g., enigo)
+    // Guardamos la estrategia dinámicamente
+    strategy: Box<dyn MouseStrategy>,
 }
 
 impl InputController {
-    pub fn new() -> Self {
-        Self {
-            // Initialization
-        }
+    pub fn new(strategy: Box<dyn MouseStrategy>) -> Self {
+        Self { strategy }
     }
 
     pub fn move_mouse(&mut self, delta_x: f32, delta_y: f32) {
-        // Logic to move the mouse in the OS
-        debug!("Moving mouse: X:{}, Y:{}", delta_x, delta_y);
+        self.strategy.move_cursor(delta_x, delta_y);
     }
 
     pub fn execute_action(&mut self, action: i32, phase: i32) {
-        // Logic for clicks, scroll, etc.
-        info!("Executing action: {}, phase: {}", action, phase);
+        self.strategy.execute_click(action, phase);
     }
 }
