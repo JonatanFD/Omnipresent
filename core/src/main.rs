@@ -1,6 +1,11 @@
 use log::{debug, error, info, warn};
+use prost::Message;
 use std::io;
 use tokio::net::UdpSocket;
+
+pub mod network {
+    include!(concat!(env!("OUT_DIR"), "/network_protocol.rs"));
+}
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
