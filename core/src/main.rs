@@ -1,19 +1,36 @@
 mod handler;
 mod mouse;
 mod network;
+mod security;
 
 use crate::handler::controller::InputController;
 use crate::mouse::factory::MouseStrategyFactory;
 use crate::network::TrackpadMessage;
-use network::server::OmnipresentServer;
+use crate::network::server::OmnipresentServer;
+use crate::security::auth::AuthInfo;
+use env_logger::Env;
+use log::info;
 use std::io;
 use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    env_logger::init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
+    info!("Starting Omnipresent Server...");
+    // Create a channel for the server to send messages to the handler thread
     let (tx, mut rx) = mpsc::channel::<TrackpadMessage>(100);
+
+    // Bind the server to the channel
+    let mut server = OmnipresentServer::bind(tx).await?;
+
+    // Get the assigned port from the server
+    let assigned_port = server.get_assigned_port()?;
+
+    // Generate authentication info for the assigned port
+    let auth_info = AuthInfo::generate(assigned_port);
+
+    server.set_token(auth_info.token);
 
     std::thread::spawn(move || {
         // 1. Use the MouseStrategyFactory to get the correct strategy for the OS
@@ -23,6 +40,8 @@ async fn main() -> io::Result<()> {
         let mut controller = InputController::new(strategy);
 
         let mut last_timestamp = 0;
+
+        info!("Omnipresent Server Started");
 
         while let Some(msg) = rx.blocking_recv() {
             if msg.timestamp < last_timestamp {
@@ -36,16 +55,11 @@ async fn main() -> io::Result<()> {
                 controller.move_mouse(msg.delta_x, msg.delta_y);
             }
 
-            if msg.action != 0 {
-                controller.execute_action(action, phase);
-            }
-
             if action != crate::network::ActionType::NoAction {
                 controller.execute_action(action, phase);
             }
         }
     });
 
-    let server = OmnipresentServer::new(8080, tx);
     server.run().await
 }
