@@ -1,4 +1,7 @@
-use crate::mouse::strategy::MouseStrategy;
+use crate::{
+    mouse::strategy::MouseStrategy,
+    network::{ActionType, PhaseType},
+};
 
 pub struct MacOsMouseStrategy;
 
@@ -12,5 +15,5 @@ impl MouseStrategy for MacOsMouseStrategy {
     fn move_cursor(&mut self, _delta_x: f32, _delta_y: f32) {
         println!("[MACOS] (Not implemented yet)");
     }
-    fn execute_click(&mut self, _action_id: i32, _phase_id: i32) {}
+    fn execute_click(&mut self, _action_id: ActionType, _phase_id: PhaseType) {}
 }

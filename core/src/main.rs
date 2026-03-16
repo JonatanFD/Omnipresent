@@ -28,6 +28,8 @@ async fn main() -> io::Result<()> {
             if msg.timestamp < last_timestamp {
                 continue;
             }
+            let action = msg.action();
+            let phase = msg.phase();
             last_timestamp = msg.timestamp;
 
             if msg.delta_x != 0.0 || msg.delta_y != 0.0 {
@@ -35,7 +37,11 @@ async fn main() -> io::Result<()> {
             }
 
             if msg.action != 0 {
-                controller.execute_action(msg.action, msg.phase);
+                controller.execute_action(action, phase);
+            }
+
+            if action != crate::network::ActionType::NoAction {
+                controller.execute_action(action, phase);
             }
         }
     });

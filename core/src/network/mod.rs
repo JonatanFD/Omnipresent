@@ -5,3 +5,4 @@ pub mod protocol {
 }
 
 pub use protocol::TrackpadMessage;
+pub use protocol::trackpad_message::{ActionType, PhaseType};

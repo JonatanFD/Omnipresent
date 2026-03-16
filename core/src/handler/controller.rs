@@ -1,4 +1,7 @@
-use crate::mouse::strategy::MouseStrategy;
+use crate::{
+    mouse::strategy::MouseStrategy,
+    network::{ActionType, PhaseType},
+};
 
 pub struct InputController {
     // Save the strategy dynamically
@@ -14,7 +17,7 @@ impl InputController {
         self.strategy.move_cursor(delta_x, delta_y);
     }
 
-    pub fn execute_action(&mut self, action: i32, phase: i32) {
+    pub fn execute_action(&mut self, action: ActionType, phase: PhaseType) {
         self.strategy.execute_click(action, phase);
     }
 }
