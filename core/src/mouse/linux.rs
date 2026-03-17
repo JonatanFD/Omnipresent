@@ -202,7 +202,19 @@ impl MouseStrategy for LinuxMouseStrategy {
                     InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTCTRL.0, 0),
                 ]);
             }
-            ActionType::SwipeDown => {}
+            ActionType::SwipeDown => {
+                let _ = self.device.emit(&[InputEvent::new(
+                    EventType::KEY.0,
+                    KeyCode::KEY_LEFTMETA.0,
+                    1,
+                )]);
+                thread::sleep(Duration::from_millis(20));
+                let _ = self.device.emit(&[InputEvent::new(
+                    EventType::KEY.0,
+                    KeyCode::KEY_LEFTMETA.0,
+                    0,
+                )]);
+            }
             ActionType::NoAction => {
                 self.scroll_accumulator_y = 0.0;
                 self.scroll_accumulator_x = 0.0;
