@@ -102,23 +102,42 @@ impl MouseStrategy for LinuxMouseStrategy {
         match action {
             ActionType::RightClick => self.handle_click_phase(KeyCode::BTN_RIGHT, phase),
             ActionType::LeftClick => self.handle_click_phase(KeyCode::BTN_LEFT, phase),
-            ActionType::DoubleClick => {
-                let _ =
-                    self.device
-                        .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 1)]);
-                thread::sleep(Duration::from_millis(20));
-                let _ =
-                    self.device
-                        .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)]);
-                thread::sleep(Duration::from_millis(20));
-                let _ =
-                    self.device
-                        .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 1)]);
-                thread::sleep(Duration::from_millis(20));
-                let _ =
-                    self.device
-                        .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)]);
-            }
+            ActionType::DoubleClick => match phase {
+                PhaseType::Start => {
+                    let _ = self.device.emit(&[InputEvent::new(
+                        EventType::KEY.0,
+                        KeyCode::BTN_LEFT.0,
+                        1,
+                    )]);
+                    thread::sleep(Duration::from_millis(20));
+                    let _ = self.device.emit(&[InputEvent::new(
+                        EventType::KEY.0,
+                        KeyCode::BTN_LEFT.0,
+                        0,
+                    )]);
+                    thread::sleep(Duration::from_millis(20));
+
+                    let _ = self.device.emit(&[InputEvent::new(
+                        EventType::KEY.0,
+                        KeyCode::BTN_LEFT.0,
+                        1,
+                    )]);
+                }
+                PhaseType::End => {
+                    let _ = self.device.emit(&[InputEvent::new(
+                        EventType::KEY.0,
+                        KeyCode::BTN_LEFT.0,
+                        0,
+                    )]);
+                }
+                _ => {
+                    let _ = self.device.emit(&[InputEvent::new(
+                        EventType::KEY.0,
+                        KeyCode::BTN_LEFT.0,
+                        0,
+                    )]);
+                }
+            },
             ActionType::VerticalScroll => {
                 // 🚀 Accumulate finger movement
                 self.scroll_accumulator_y += dy;
