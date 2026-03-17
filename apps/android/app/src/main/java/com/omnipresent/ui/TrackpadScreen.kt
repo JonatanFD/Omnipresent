@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.QrCodeScanner // 🚀 IMPORTANTE: Nuevo ícono
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,6 +22,9 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.omnipresent.network.UdpClient
 import com.omnipresent.protocol.TrackpadMessage
 import com.omnipresent.protocol.trackpadMessage
@@ -59,12 +62,27 @@ fun TrackpadScreen(
     val context = LocalContext.current
     DisposableEffect(Unit) {
         val activity = context as? Activity
+        val window = activity?.window
+
         val originalOrientation = activity?.requestedOrientation
             ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE
+
+        if (window != null) {
+            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+            insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
+        }
+
         onDispose {
-            udpClient.close() // Socket closes automatically when leaving this screen
+            udpClient.close()
             activity?.requestedOrientation = originalOrientation
+
+            if (window != null) {
+                val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                insetsController.show(WindowInsetsCompat.Type.systemBars())
+            }
         }
     }
 
@@ -238,7 +256,7 @@ fun TrackpadScreen(
         // --- TOP-LEFT MENU UI ---
         Box(
             modifier = Modifier
-                .statusBarsPadding()
+                .safeDrawingPadding() // Reemplazo de statusBarsPadding()
                 .padding(16.dp)
                 .align(Alignment.TopStart)
         ) {
@@ -256,7 +274,6 @@ fun TrackpadScreen(
                 expanded = showMenu,
                 onDismissRequest = { showMenu = false }
             ) {
-                // 🚀 NUEVO: Botón para escanear de nuevo
                 DropdownMenuItem(
                     text = { Text("Scan QR") },
                     onClick = {
