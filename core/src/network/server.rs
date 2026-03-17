@@ -47,14 +47,6 @@ impl OmnipresentServer {
                             continue;
                         }
 
-                        info!(
-                            "Received event - dx: {:.2}, dy: {:.2}, action: {:?}, phase: {:?}",
-                            msg.delta_x,
-                            msg.delta_y,
-                            msg.action(),
-                            msg.phase()
-                        );
-
                         if let Err(e) = self.tx.send(msg).await {
                             error!("Channel receiver closed: {}", e);
                             break;

@@ -3,13 +3,10 @@ use crate::network::{ActionType, PhaseType};
 use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
 use evdev::{AttributeSet, EventType, InputEvent, KeyCode, RelativeAxisCode};
 
-// 🚀 SCROLL SENSITIVITY CONSTANT
-// The higher the number, the slower and smoother the scroll will be. (e.g. 10.0 to 30.0 is usually comfortable)
 const SCROLL_THRESHOLD: f32 = 15.0;
 
 pub struct LinuxMouseStrategy {
     device: VirtualDevice,
-    // 🚀 Accumulators to smooth scrolling
     scroll_accumulator_y: f32,
     scroll_accumulator_x: f32,
 }

@@ -51,6 +51,14 @@ async fn main() -> io::Result<()> {
             let phase = msg.phase();
             last_timestamp = msg.timestamp;
 
+            info!(
+                "Received event - dx: {:.2}, dy: {:.2}, action: {:?}, phase: {:?}",
+                msg.delta_x,
+                msg.delta_y,
+                msg.action(),
+                msg.phase()
+            );
+
             if (msg.delta_x != 0.0 || msg.delta_y != 0.0) && action == ActionType::NoAction {
                 controller.move_mouse(msg.delta_x, msg.delta_y);
             }
