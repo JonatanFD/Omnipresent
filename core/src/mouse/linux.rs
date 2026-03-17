@@ -31,14 +31,14 @@ impl LinuxMouseStrategy {
         rel_axes.insert(RelativeAxisCode::REL_HWHEEL);
 
         let device = VirtualDeviceBuilder::new()
-            .expect("Error al iniciar el constructor uinput")
+            .expect("Failed to initialize uinput builder")
             .name("Omnipresent Virtual Trackpad")
             .with_keys(&keys)
-            .expect("Error agregando botones al dispositivo")
+            .expect("Failed to add key capabilities to device")
             .with_relative_axes(&rel_axes)
-            .expect("Error agregando ejes de movimiento")
+            .expect("Failed to add relative axes")
             .build()
-            .expect("FATAL: Fallo al crear el dispositivo uinput.");
+            .expect("FATAL: Failed to create uinput device");
 
         Self {
             device,
@@ -47,6 +47,7 @@ impl LinuxMouseStrategy {
         }
     }
 
+    // Handles click behavior depending on gesture phase
     fn handle_click_phase(&mut self, button: KeyCode, phase: PhaseType) {
         match phase {
             PhaseType::Start => {
@@ -75,6 +76,7 @@ impl MouseStrategy for LinuxMouseStrategy {
         let dy = delta_y.round() as i32;
 
         let mut events = Vec::new();
+
         if dx != 0 {
             events.push(InputEvent::new(
                 EventType::RELATIVE.0,
@@ -82,6 +84,7 @@ impl MouseStrategy for LinuxMouseStrategy {
                 dx,
             ));
         }
+
         if dy != 0 {
             events.push(InputEvent::new(
                 EventType::RELATIVE.0,
@@ -101,18 +104,20 @@ impl MouseStrategy for LinuxMouseStrategy {
 
         match action {
             ActionType::RightClick => self.handle_click_phase(KeyCode::BTN_RIGHT, phase),
+
             ActionType::LeftClick => self.handle_click_phase(KeyCode::BTN_LEFT, phase),
+
             ActionType::DoubleClick => match phase {
                 PhaseType::Start => {
-                    // 1. Primer tap: Presionar
+                    // First click: press
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
                         1,
                     )]);
-                    thread::sleep(Duration::from_millis(30)); // Aumentamos un poco la pausa
+                    thread::sleep(Duration::from_millis(30));
 
-                    // 2. Primer tap: Soltar
+                    // First click: release
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
@@ -120,7 +125,7 @@ impl MouseStrategy for LinuxMouseStrategy {
                     )]);
                     thread::sleep(Duration::from_millis(30));
 
-                    // 3. Segundo tap: Presionar y MANTENER
+                    // Second click: press and hold
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
@@ -128,12 +133,10 @@ impl MouseStrategy for LinuxMouseStrategy {
                     )]);
                 }
                 PhaseType::End => {
-                    // Si el End llega casi instantáneamente, a veces Linux no registra
-                    // que hubo tiempo suficiente entre la "presión" y la "liberación"
-                    // para el segundo clic. Le damos un ligerísimo margen.
+                    // Add a small delay to ensure Linux registers the second click properly
                     thread::sleep(Duration::from_millis(20));
 
-                    // 4. Segundo tap: Soltar
+                    // Second click: release
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
@@ -148,11 +151,12 @@ impl MouseStrategy for LinuxMouseStrategy {
                     )]);
                 }
             },
+
             ActionType::VerticalScroll => {
-                // 🚀 Accumulate finger movement
+                // Accumulate finger movement for smooth scrolling
                 self.scroll_accumulator_y += dy;
 
-                // Only emit a wheel "tick" when the threshold is exceeded
+                // Emit scroll event only when threshold is reached
                 if self.scroll_accumulator_y.abs() >= SCROLL_THRESHOLD {
                     let scroll_direction = if self.scroll_accumulator_y > 0.0 {
                         1
@@ -166,11 +170,13 @@ impl MouseStrategy for LinuxMouseStrategy {
                         scroll_direction,
                     )]);
 
-                    // Reset the accumulator but keep the remainder to avoid losing smoothness
+                    // Preserve remainder for smoother continuous scrolling
                     self.scroll_accumulator_y %= SCROLL_THRESHOLD;
                 }
             }
+
             ActionType::HorizontalScroll => {
+                // Accumulate horizontal movement
                 self.scroll_accumulator_x += dx;
 
                 if self.scroll_accumulator_x.abs() >= SCROLL_THRESHOLD {
@@ -189,6 +195,7 @@ impl MouseStrategy for LinuxMouseStrategy {
                     self.scroll_accumulator_x %= SCROLL_THRESHOLD;
                 }
             }
+
             ActionType::SwipeUp => {
                 let _ = self.device.emit(&[InputEvent::new(
                     EventType::KEY.0,
@@ -202,6 +209,7 @@ impl MouseStrategy for LinuxMouseStrategy {
                     0,
                 )]);
             }
+
             ActionType::SwipeLeft => {
                 let _ = self.device.emit(&[
                     InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTCTRL.0, 1),
@@ -215,6 +223,7 @@ impl MouseStrategy for LinuxMouseStrategy {
                     InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTCTRL.0, 0),
                 ]);
             }
+
             ActionType::SwipeRight => {
                 let _ = self.device.emit(&[
                     InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTCTRL.0, 1),
@@ -228,6 +237,7 @@ impl MouseStrategy for LinuxMouseStrategy {
                     InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTCTRL.0, 0),
                 ]);
             }
+
             ActionType::SwipeDown => {
                 let _ = self.device.emit(&[InputEvent::new(
                     EventType::KEY.0,
@@ -241,7 +251,9 @@ impl MouseStrategy for LinuxMouseStrategy {
                     0,
                 )]);
             }
+
             ActionType::NoAction => {
+                // Reset accumulators when no gesture is active
                 self.scroll_accumulator_y = 0.0;
                 self.scroll_accumulator_x = 0.0;
             }
