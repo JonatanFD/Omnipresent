@@ -149,9 +149,9 @@ impl MouseStrategy for LinuxMouseStrategy {
 
                 if self.scroll_accumulator_x.abs() >= SCROLL_THRESHOLD {
                     let scroll_direction = if self.scroll_accumulator_x > 0.0 {
-                        1
-                    } else {
                         -1
+                    } else {
+                        1
                     };
 
                     let _ = self.device.emit(&[InputEvent::new(
