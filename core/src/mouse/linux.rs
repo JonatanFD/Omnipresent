@@ -104,19 +104,23 @@ impl MouseStrategy for LinuxMouseStrategy {
             ActionType::LeftClick => self.handle_click_phase(KeyCode::BTN_LEFT, phase),
             ActionType::DoubleClick => match phase {
                 PhaseType::Start => {
+                    // 1. Primer tap: Presionar
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
                         1,
                     )]);
-                    thread::sleep(Duration::from_millis(20));
+                    thread::sleep(Duration::from_millis(30)); // Aumentamos un poco la pausa
+
+                    // 2. Primer tap: Soltar
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
                         0,
                     )]);
-                    thread::sleep(Duration::from_millis(20));
+                    thread::sleep(Duration::from_millis(30));
 
+                    // 3. Segundo tap: Presionar y MANTENER
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
@@ -124,6 +128,12 @@ impl MouseStrategy for LinuxMouseStrategy {
                     )]);
                 }
                 PhaseType::End => {
+                    // Si el End llega casi instantáneamente, a veces Linux no registra
+                    // que hubo tiempo suficiente entre la "presión" y la "liberación"
+                    // para el segundo clic. Le damos un ligerísimo margen.
+                    thread::sleep(Duration::from_millis(20));
+
+                    // 4. Segundo tap: Soltar
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
