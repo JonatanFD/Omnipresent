@@ -18,13 +18,14 @@ fun AppNavigation() {
                 navController.navigate("scanner")
             })
         }
+
         composable("scanner") {
             ScannerScreen(onQrScanned = { qrUri ->
                 val uri = Uri.parse(qrUri)
                 val ip = uri.host ?: ""
                 val port = uri.port
                 val token = uri.getQueryParameter("token")?.toIntOrNull() ?: 0
-                
+
                 if (ip.isNotEmpty() && port != -1) {
                     navController.navigate("trackpad/$ip/$port/$token") {
                         popUpTo("home")
@@ -32,6 +33,7 @@ fun AppNavigation() {
                 }
             })
         }
+
         composable(
             route = "trackpad/{ip}/{port}/{token}",
             arguments = listOf(
@@ -43,13 +45,20 @@ fun AppNavigation() {
             val ip = backStackEntry.arguments?.getString("ip") ?: ""
             val port = backStackEntry.arguments?.getInt("port") ?: 0
             val token = backStackEntry.arguments?.getInt("token") ?: 0
-            
+
             TrackpadScreen(
                 ip = ip,
                 port = port,
                 token = token,
                 onExit = {
+                    // Returns to the home screen
                     navController.popBackStack("home", inclusive = false)
+                },
+                onScanNewQr = {
+                    // Navigates to scanner and clears the trackpad from the backstack
+                    navController.navigate("scanner") {
+                        popUpTo("home")
+                    }
                 }
             )
         }

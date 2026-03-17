@@ -3,8 +3,15 @@ use crate::network::{ActionType, PhaseType};
 use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
 use evdev::{AttributeSet, EventType, InputEvent, KeyCode, RelativeAxisCode};
 
+// 🚀 SCROLL SENSITIVITY CONSTANT
+// The higher the number, the slower and smoother the scroll will be. (e.g. 10.0 to 30.0 is usually comfortable)
+const SCROLL_THRESHOLD: f32 = 15.0;
+
 pub struct LinuxMouseStrategy {
     device: VirtualDevice,
+    // 🚀 Accumulators to smooth scrolling
+    scroll_accumulator_y: f32,
+    scroll_accumulator_x: f32,
 }
 
 impl LinuxMouseStrategy {
@@ -36,7 +43,11 @@ impl LinuxMouseStrategy {
             .build()
             .expect("FATAL: Fallo al crear el dispositivo uinput.");
 
-        Self { device } // 🚀 Struct limpio de nuevo
+        Self {
+            device,
+            scroll_accumulator_y: 0.0,
+            scroll_accumulator_x: 0.0,
+        }
     }
 
     fn handle_click_phase(&mut self, button: KeyCode, phase: PhaseType) {
@@ -87,7 +98,6 @@ impl MouseStrategy for LinuxMouseStrategy {
         }
     }
 
-    // 🚀 AHORA RECIBIMOS dx Y dy DESDE EL MAIN
     fn execute_action(&mut self, action: ActionType, phase: PhaseType, dx: f32, dy: f32) {
         use std::thread;
         use std::time::Duration;
@@ -113,23 +123,45 @@ impl MouseStrategy for LinuxMouseStrategy {
                         .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)]);
             }
             ActionType::VerticalScroll => {
-                // 🚀 USAMOS LOS DELTAS FRESCOS
-                let scroll_direction = if dy > 0.0 { 1 } else { -1 };
+                // 🚀 Accumulate finger movement
+                self.scroll_accumulator_y += dy;
 
-                let _ = self.device.emit(&[InputEvent::new(
-                    EventType::RELATIVE.0,
-                    RelativeAxisCode::REL_WHEEL.0,
-                    scroll_direction,
-                )]);
+                // Only emit a wheel "tick" when the threshold is exceeded
+                if self.scroll_accumulator_y.abs() >= SCROLL_THRESHOLD {
+                    let scroll_direction = if self.scroll_accumulator_y > 0.0 {
+                        1
+                    } else {
+                        -1
+                    };
+
+                    let _ = self.device.emit(&[InputEvent::new(
+                        EventType::RELATIVE.0,
+                        RelativeAxisCode::REL_WHEEL.0,
+                        scroll_direction,
+                    )]);
+
+                    // Reset the accumulator but keep the remainder to avoid losing smoothness
+                    self.scroll_accumulator_y %= SCROLL_THRESHOLD;
+                }
             }
             ActionType::HorizontalScroll => {
-                let scroll_direction = if dx > 0.0 { 1 } else { -1 };
+                self.scroll_accumulator_x += dx;
 
-                let _ = self.device.emit(&[InputEvent::new(
-                    EventType::RELATIVE.0,
-                    RelativeAxisCode::REL_HWHEEL.0,
-                    scroll_direction,
-                )]);
+                if self.scroll_accumulator_x.abs() >= SCROLL_THRESHOLD {
+                    let scroll_direction = if self.scroll_accumulator_x > 0.0 {
+                        1
+                    } else {
+                        -1
+                    };
+
+                    let _ = self.device.emit(&[InputEvent::new(
+                        EventType::RELATIVE.0,
+                        RelativeAxisCode::REL_HWHEEL.0,
+                        scroll_direction,
+                    )]);
+
+                    self.scroll_accumulator_x %= SCROLL_THRESHOLD;
+                }
             }
             ActionType::SwipeUp => {
                 let _ = self.device.emit(&[InputEvent::new(
@@ -171,7 +203,10 @@ impl MouseStrategy for LinuxMouseStrategy {
                 ]);
             }
             ActionType::SwipeDown => {}
-            ActionType::NoAction => {}
+            ActionType::NoAction => {
+                self.scroll_accumulator_y = 0.0;
+                self.scroll_accumulator_x = 0.0;
+            }
         }
     }
 }
