@@ -17,7 +17,7 @@ impl InputController {
         self.strategy.move_cursor(delta_x, delta_y);
     }
 
-    pub fn execute_action(&mut self, action: ActionType, phase: PhaseType) {
-        self.strategy.execute_click(action, phase);
+    pub fn execute_action(&mut self, action: ActionType, phase: PhaseType, dx: f32, dy: f32) {
+        self.strategy.execute_action(action, phase, dx, dy);
     }
 }

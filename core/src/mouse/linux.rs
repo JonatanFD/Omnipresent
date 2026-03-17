@@ -14,12 +14,11 @@ impl LinuxMouseStrategy {
         keys.insert(KeyCode::BTN_RIGHT);
         keys.insert(KeyCode::BTN_MIDDLE);
 
-        // 🚀 NUEVO: Teclas necesarias para los gestos
-        keys.insert(KeyCode::KEY_LEFTMETA); // Super / Start
+        keys.insert(KeyCode::KEY_LEFTMETA);
         keys.insert(KeyCode::KEY_LEFTCTRL);
         keys.insert(KeyCode::KEY_LEFTALT);
-        keys.insert(KeyCode::KEY_LEFT); // Flecha Izquierda
-        keys.insert(KeyCode::KEY_RIGHT); // Flecha Derecha
+        keys.insert(KeyCode::KEY_LEFT);
+        keys.insert(KeyCode::KEY_RIGHT);
 
         let mut rel_axes = AttributeSet::<RelativeAxisCode>::new();
         rel_axes.insert(RelativeAxisCode::REL_X);
@@ -35,9 +34,9 @@ impl LinuxMouseStrategy {
             .with_relative_axes(&rel_axes)
             .expect("Error agregando ejes de movimiento")
             .build()
-            .expect("FATAL: Fallo al crear el dispositivo uinput. ¿Lo ejecutaste con sudo?");
+            .expect("FATAL: Fallo al crear el dispositivo uinput.");
 
-        Self { device }
+        Self { device } // 🚀 Struct limpio de nuevo
     }
 
     fn handle_click_phase(&mut self, button: KeyCode, phase: PhaseType) {
@@ -88,7 +87,8 @@ impl MouseStrategy for LinuxMouseStrategy {
         }
     }
 
-    fn execute_click(&mut self, action: ActionType, phase: PhaseType) {
+    // 🚀 AHORA RECIBIMOS dx Y dy DESDE EL MAIN
+    fn execute_action(&mut self, action: ActionType, phase: PhaseType, dx: f32, dy: f32) {
         use std::thread;
         use std::time::Duration;
 
@@ -113,20 +113,24 @@ impl MouseStrategy for LinuxMouseStrategy {
                         .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)]);
             }
             ActionType::VerticalScroll => {
+                // 🚀 USAMOS LOS DELTAS FRESCOS
+                let scroll_direction = if dy > 0.0 { 1 } else { -1 };
+
                 let _ = self.device.emit(&[InputEvent::new(
                     EventType::RELATIVE.0,
                     RelativeAxisCode::REL_WHEEL.0,
-                    -1,
+                    scroll_direction,
                 )]);
             }
             ActionType::HorizontalScroll => {
+                let scroll_direction = if dx > 0.0 { 1 } else { -1 };
+
                 let _ = self.device.emit(&[InputEvent::new(
                     EventType::RELATIVE.0,
                     RelativeAxisCode::REL_HWHEEL.0,
-                    1,
+                    scroll_direction,
                 )]);
             }
-            // 🚀 GESTOS CORREGIDOS CON DELAY HUMANO
             ActionType::SwipeUp => {
                 let _ = self.device.emit(&[InputEvent::new(
                     EventType::KEY.0,

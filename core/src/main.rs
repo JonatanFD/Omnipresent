@@ -5,8 +5,8 @@ mod security;
 
 use crate::handler::controller::InputController;
 use crate::mouse::factory::MouseStrategyFactory;
-use crate::network::TrackpadMessage;
 use crate::network::server::OmnipresentServer;
+use crate::network::{ActionType, TrackpadMessage};
 use crate::security::auth::AuthInfo;
 use env_logger::Env;
 use log::info;
@@ -51,12 +51,12 @@ async fn main() -> io::Result<()> {
             let phase = msg.phase();
             last_timestamp = msg.timestamp;
 
-            if msg.delta_x != 0.0 || msg.delta_y != 0.0 {
+            if (msg.delta_x != 0.0 || msg.delta_y != 0.0) && action == ActionType::NoAction {
                 controller.move_mouse(msg.delta_x, msg.delta_y);
             }
 
             if action != crate::network::ActionType::NoAction {
-                controller.execute_action(action, phase);
+                controller.execute_action(action, phase, msg.delta_x, msg.delta_y);
             }
         }
     });

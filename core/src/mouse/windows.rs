@@ -15,5 +15,5 @@ impl MouseStrategy for WindowsMouseStrategy {
     fn move_cursor(&mut self, _delta_x: f32, _delta_y: f32) {
         println!("[WINDOWS] (Not implemented yet)");
     }
-    fn execute_click(&mut self, _action_id: ActionType, _phase_id: PhaseType) {}
+    fn execute_action(&mut self, action: ActionType, phase: PhaseType, dx: f32, dy: f32) {}
 }
