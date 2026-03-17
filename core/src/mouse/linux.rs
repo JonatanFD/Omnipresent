@@ -9,23 +9,27 @@ pub struct LinuxMouseStrategy {
 
 impl LinuxMouseStrategy {
     pub fn new() -> Self {
-        // 1. Declaramos qué botones físicos tendrá nuestro "Mouse Virtual"
         let mut keys = AttributeSet::<KeyCode>::new();
         keys.insert(KeyCode::BTN_LEFT);
         keys.insert(KeyCode::BTN_RIGHT);
         keys.insert(KeyCode::BTN_MIDDLE);
 
-        // 2. Declaramos qué ejes de movimiento tendrá (X, Y y Ruedas de Scroll)
+        // 🚀 NUEVO: Teclas necesarias para los gestos
+        keys.insert(KeyCode::KEY_LEFTMETA); // Super / Start
+        keys.insert(KeyCode::KEY_LEFTCTRL);
+        keys.insert(KeyCode::KEY_LEFTALT);
+        keys.insert(KeyCode::KEY_LEFT); // Flecha Izquierda
+        keys.insert(KeyCode::KEY_RIGHT); // Flecha Derecha
+
         let mut rel_axes = AttributeSet::<RelativeAxisCode>::new();
         rel_axes.insert(RelativeAxisCode::REL_X);
         rel_axes.insert(RelativeAxisCode::REL_Y);
-        rel_axes.insert(RelativeAxisCode::REL_WHEEL); // Scroll vertical
-        rel_axes.insert(RelativeAxisCode::REL_HWHEEL); // Scroll horizontal
+        rel_axes.insert(RelativeAxisCode::REL_WHEEL);
+        rel_axes.insert(RelativeAxisCode::REL_HWHEEL);
 
-        // 3. Le pedimos al Kernel que cree el dispositivo USB falso
         let device = VirtualDeviceBuilder::new()
             .expect("Error al iniciar el constructor uinput")
-            .name("Omnipresent Virtual Trackpad") // ¡Aparecerá así en tu configuración de Linux!
+            .name("Omnipresent Virtual Trackpad")
             .with_keys(&keys)
             .expect("Error agregando botones al dispositivo")
             .with_relative_axes(&rel_axes)
@@ -49,7 +53,6 @@ impl LinuxMouseStrategy {
                     .emit(&[InputEvent::new(EventType::KEY.0, button.0, 0)]);
             }
             _ => {
-                // Click completo (presionar y soltar)
                 let _ = self.device.emit(&[
                     InputEvent::new(EventType::KEY.0, button.0, 1),
                     InputEvent::new(EventType::KEY.0, button.0, 0),
@@ -86,16 +89,28 @@ impl MouseStrategy for LinuxMouseStrategy {
     }
 
     fn execute_click(&mut self, action: ActionType, phase: PhaseType) {
+        use std::thread;
+        use std::time::Duration;
+
         match action {
             ActionType::RightClick => self.handle_click_phase(KeyCode::BTN_RIGHT, phase),
             ActionType::LeftClick => self.handle_click_phase(KeyCode::BTN_LEFT, phase),
             ActionType::DoubleClick => {
-                let _ = self.device.emit(&[
-                    InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 1),
-                    InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0),
-                    InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 1),
-                    InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0),
-                ]);
+                let _ =
+                    self.device
+                        .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 1)]);
+                thread::sleep(Duration::from_millis(20));
+                let _ =
+                    self.device
+                        .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)]);
+                thread::sleep(Duration::from_millis(20));
+                let _ =
+                    self.device
+                        .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 1)]);
+                thread::sleep(Duration::from_millis(20));
+                let _ =
+                    self.device
+                        .emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)]);
             }
             ActionType::VerticalScroll => {
                 let _ = self.device.emit(&[InputEvent::new(
@@ -111,12 +126,47 @@ impl MouseStrategy for LinuxMouseStrategy {
                     1,
                 )]);
             }
-            ActionType::SwipeLeft
-            | ActionType::SwipeRight
-            | ActionType::SwipeUp
-            | ActionType::SwipeDown => {
-                println!("Swipe detectado, no implementado aún.");
+            // 🚀 GESTOS CORREGIDOS CON DELAY HUMANO
+            ActionType::SwipeUp => {
+                let _ = self.device.emit(&[InputEvent::new(
+                    EventType::KEY.0,
+                    KeyCode::KEY_LEFTMETA.0,
+                    1,
+                )]);
+                thread::sleep(Duration::from_millis(20));
+                let _ = self.device.emit(&[InputEvent::new(
+                    EventType::KEY.0,
+                    KeyCode::KEY_LEFTMETA.0,
+                    0,
+                )]);
             }
+            ActionType::SwipeLeft => {
+                let _ = self.device.emit(&[
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTCTRL.0, 1),
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTALT.0, 1),
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_RIGHT.0, 1),
+                ]);
+                thread::sleep(Duration::from_millis(20));
+                let _ = self.device.emit(&[
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_RIGHT.0, 0),
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTALT.0, 0),
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTCTRL.0, 0),
+                ]);
+            }
+            ActionType::SwipeRight => {
+                let _ = self.device.emit(&[
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTCTRL.0, 1),
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTALT.0, 1),
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFT.0, 1),
+                ]);
+                thread::sleep(Duration::from_millis(20));
+                let _ = self.device.emit(&[
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFT.0, 0),
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTALT.0, 0),
+                    InputEvent::new(EventType::KEY.0, KeyCode::KEY_LEFTCTRL.0, 0),
+                ]);
+            }
+            ActionType::SwipeDown => {}
             ActionType::NoAction => {}
         }
     }
