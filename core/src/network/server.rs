@@ -17,19 +17,49 @@ pub struct OmnipresentServer {
 impl OmnipresentServer {
     pub async fn start_discovery_service(port: u16, token: u32) -> io::Result<()> {
         let discovery_port = port + 1;
-        let address = format!("0.0.0.0:{}", discovery_port);
-        let socket = UdpSocket::bind(&address).await?;
-        let mut buf = [0u8; 1024];
 
-        info!("Service discovery active on port {}", discovery_port);
+        // 1. MAGIA PARA WINDOWS: En lugar de 0.0.0.0, obtenemos la IP real del Wi-Fi
+        let bind_ip = match local_ip_address::local_ip() {
+            Ok(ip) => ip.to_string(),
+            Err(_) => "0.0.0.0".to_string(), // Fallback a 0.0.0.0 solo si falla
+        };
+
+        let address = format!("{}:{}", bind_ip, discovery_port);
+
+        // 2. Nos unimos a la IP exacta de la antena
+        let socket = match UdpSocket::bind(&address).await {
+            Ok(s) => s,
+            Err(_) => {
+                // Si falla, intentamos el modo tradicional
+                UdpSocket::bind(format!("0.0.0.0:{}", discovery_port)).await?
+            }
+        };
+
+        if let Err(e) = socket.set_broadcast(true) {
+            warn!("No se pudo activar el modo broadcast: {}", e);
+        }
+
+        info!(
+            "🚀 Service discovery active exactly on IP {} (Port {})",
+            bind_ip, discovery_port
+        );
+
+        let mut buf = [0u8; 1024];
 
         loop {
             match socket.recv_from(&mut buf).await {
                 Ok((len, peer)) => {
                     let message = String::from_utf8_lossy(&buf[..len]);
+
+                    info!(
+                        "🎯 [DISCOVERY] Grito recibido desde {}: '{}'",
+                        peer, message
+                    );
+
                     if message == "OMNIPRESENT_DISCOVERY" {
                         let response = format!("OMNIPRESENT_HERE|{}|{}", port, token);
                         let _ = socket.send_to(response.as_bytes(), peer).await;
+                        info!("✅ [DISCOVERY] Respuesta enviada a {}", peer);
                     }
                 }
                 Err(e) => {
