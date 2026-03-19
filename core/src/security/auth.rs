@@ -3,48 +3,48 @@ use rand::{Rng, RngExt};
 use std::fs;
 use std::path::Path;
 
-// El nombre del archivo donde guardaremos el PIN
+// The name of the file where we will save the PIN
 const AUTH_FILE: &str = "omnipresent_auth.txt";
 
 pub struct AuthInfo;
 
 impl AuthInfo {
-    /// Obtiene el token guardado o genera uno nuevo si no existe.
-    /// También permite forzar la regeneración si `force_reset` es true.
+    /// Gets the saved token or generates a new one if it does not exist.
+    /// Also allows forcing regeneration if `force_reset` is true.
     pub fn get_or_create_token(force_reset: bool) -> u32 {
         let path = Path::new(AUTH_FILE);
 
-        // Si no estamos forzando un reinicio y el archivo existe, intentamos leerlo
+        // If we are not forcing a reset and the file exists, we attempt to read it
         if !force_reset && path.exists() {
             match fs::read_to_string(path) {
                 Ok(contents) => {
-                    // Limpiamos espacios/saltos de línea y convertimos a número
+                    // Clean spaces/newlines and convert to a number
                     match contents.trim().parse::<u32>() {
                         Ok(token) => {
-                            info!("Pin de seguridad cargado exitosamente: {}", token);
+                            info!("Security pin successfully loaded: {}", token);
                             return token;
                         }
-                        Err(_) => warn!("El archivo de token es inválido. Generando uno nuevo..."),
+                        Err(_) => warn!("The token file is invalid. Generating a new one..."),
                     }
                 }
                 Err(e) => warn!(
-                    "No se pudo leer el archivo de token ({}). Generando uno nuevo...",
+                    "Could not read the token file ({}). Generating a new one...",
                     e
                 ),
             }
         }
 
-        // Si llegamos aquí, necesitamos un PIN nuevo (no existía, falló o se forzó el reset)
+        // If we get here, we need a new PIN (did not exist, failed, or reset was forced)
         let new_token = Self::generate_random_pin();
 
-        // Guardamos el nuevo PIN en el archivo para la próxima vez
+        // We save the new PIN to the file for next time
         match fs::write(path, new_token.to_string()) {
             Ok(_) => info!(
-                "Nuevo PIN generado y guardado en '{}': {}",
+                "New PIN generated and saved in '{}': {}",
                 AUTH_FILE, new_token
             ),
             Err(e) => warn!(
-                "Se generó el PIN {}, pero no se pudo guardar en disco: {}",
+                "PIN {} was generated, but could not be saved to disk: {}",
                 new_token, e
             ),
         }
@@ -52,7 +52,7 @@ impl AuthInfo {
         new_token
     }
 
-    /// Genera un número aleatorio de 6 dígitos (100000 - 999999)
+    /// Generates a random 6-digit number (100000 - 999999)
     fn generate_random_pin() -> u32 {
         let mut rng = rand::rng();
         rng.random_range(100_000..=999_999)

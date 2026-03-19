@@ -51,7 +51,7 @@ impl LinuxMouseStrategy {
         }
     }
 
-    // Maneja los clics dependiendo de la fase
+    // Handle clicks depending on the phase
     fn handle_click_phase(&mut self, button: KeyCode, phase: PhaseType) {
         match phase {
             PhaseType::Start => {

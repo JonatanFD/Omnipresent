@@ -15,19 +15,19 @@ pub struct OmnipresentServer {
 }
 
 impl OmnipresentServer {
-    // 1. Modificamos bind para recibir el puerto deseado
+    // 1. Modify bind to receive the desired port
     pub async fn bind(tx: mpsc::Sender<TrackpadMessage>, port: u16) -> io::Result<Self> {
         let address = format!("0.0.0.0:{}", port);
 
-        // 2. Intentamos usar ESE puerto estrictamente
+        // 2. Attempt to use THAT port strictly
         let socket = match UdpSocket::bind(&address).await {
             Ok(s) => {
-                info!("Servidor enlazado exitosamente al puerto fijo: {}", port);
+                info!("Server successfully bound to fixed port: {}", port);
                 s
             }
             Err(e) => {
                 error!(
-                    "FATAL: No se pudo usar el puerto {}. ¿Otra app lo está usando? Error: {}",
+                    "FATAL: Could not use port {}. Is another app using it? Error: {}",
                     port, e
                 );
                 return Err(e);
@@ -43,7 +43,7 @@ impl OmnipresentServer {
         })
     }
 
-    // (Opcional) Puedes eliminar get_assigned_port() ya que tú defines el puerto ahora.
+    // (Optional) You can remove get_assigned_port() since you define the port now.
 
     pub fn set_token(&mut self, token: u32) {
         self.token = token;
@@ -57,16 +57,16 @@ impl OmnipresentServer {
                 Ok((len, peer)) => {
                     match TrackpadMessage::decode(&buf[..len]) {
                         Ok(msg) => {
-                            // Verificación de Seguridad con el token fijo
+                            // Security verification with fixed token
                             if msg.auth_token != self.token {
-                                warn!("Token inválido desde {}. Rechazando.", peer.ip());
+                                warn!("Invalid token from {}. Rejecting.", peer.ip());
 
                                 let _ = self.socket.send_to(b"AUTH_FAIL", peer).await;
                                 continue;
                             }
 
                             if self.is_first_packet {
-                                info!("Nuevo cliente autenticado desde {}", peer);
+                                info!("New client authenticated from {}", peer);
                                 let _ = self.socket.send_to(b"AUTH_OK", peer).await;
                                 self.is_first_packet = false;
                             }
@@ -90,16 +90,16 @@ impl OmnipresentServer {
                             if let Err(e) = self.tx.try_send(msg) {
                                 match e {
                                     mpsc::error::TrySendError::Full(_) => {
-                                        warn!("Buffer lleno, descartando paquete")
+                                        warn!("Buffer full, discarding packet")
                                     }
                                     mpsc::error::TrySendError::Closed(_) => break,
                                 }
                             }
                         }
-                        Err(e) => error!("Error Protobuf: {}", e),
+                        Err(e) => error!("Protobuf Error: {}", e),
                     }
                 }
-                Err(e) => error!("Error UDP: {}", e),
+                Err(e) => error!("UDP Error: {}", e),
             }
         }
         Ok(())
