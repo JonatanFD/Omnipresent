@@ -1,45 +1,60 @@
-use image::Luma;
-use local_ip_address::local_ip;
-use log::{error, info};
-use qrcode::QrCode;
-use rand::RngExt;
-use std::net::IpAddr;
+use log::{info, warn};
+use rand::{Rng, RngExt};
+use std::fs;
+use std::path::Path;
 
-pub struct AuthInfo {
-    pub ip: IpAddr,
-    pub port: u16,
-    pub token: u32, // 6-digit PIN
-}
+// El nombre del archivo donde guardaremos el PIN
+const AUTH_FILE: &str = "omnipresent_auth.txt";
+
+pub struct AuthInfo;
 
 impl AuthInfo {
-    pub fn generate(port: u16) -> Self {
-        // 1. Get the local IP address of the machine on the Wi-Fi/Ethernet network
-        let ip = local_ip().expect("Failed to retrieve the machine's local IP address");
+    /// Obtiene el token guardado o genera uno nuevo si no existe.
+    /// También permite forzar la regeneración si `force_reset` es true.
+    pub fn get_or_create_token(force_reset: bool) -> u32 {
+        let path = Path::new(AUTH_FILE);
 
-        // 2. Generate a random 6-digit token
-        let token: u32 = rand::rng().random_range(100_000..=999_999);
-
-        // 3. Create the payload string that Android will read
-        // We use a custom URI scheme so it is easy to parse on the mobile app
-        let payload = format!("omnipresent://{}:{}?token={}", ip, port, token);
-
-        // 4. Generate the QR code in memory
-        let code = QrCode::new(payload.as_bytes()).expect("Failed to generate the QR code");
-
-        // 5. Save the QR code as a PNG image
-        let image_path = "pairing_qr.png";
-        let image = code.render::<Luma<u8>>().build();
-        image.save(image_path).expect("Failed to save the PNG file");
-
-        if let Err(e) = opener::open(image_path) {
-            error!("Could not open the QR code image automatically: {}", e);
+        // Si no estamos forzando un reinicio y el archivo existe, intentamos leerlo
+        if !force_reset && path.exists() {
+            match fs::read_to_string(path) {
+                Ok(contents) => {
+                    // Limpiamos espacios/saltos de línea y convertimos a número
+                    match contents.trim().parse::<u32>() {
+                        Ok(token) => {
+                            info!("Pin de seguridad cargado exitosamente: {}", token);
+                            return token;
+                        }
+                        Err(_) => warn!("El archivo de token es inválido. Generando uno nuevo..."),
+                    }
+                }
+                Err(e) => warn!(
+                    "No se pudo leer el archivo de token ({}). Generando uno nuevo...",
+                    e
+                ),
+            }
         }
 
-        info!("📍 Server IP       : {}", ip);
-        info!("🔌 Port            : {}", port);
-        info!("🔑 Auth Token (PIN): {}", token);
-        info!("🖼️  Image saved     : pairing_qr.png (in the project root)");
+        // Si llegamos aquí, necesitamos un PIN nuevo (no existía, falló o se forzó el reset)
+        let new_token = Self::generate_random_pin();
 
-        Self { ip, port, token }
+        // Guardamos el nuevo PIN en el archivo para la próxima vez
+        match fs::write(path, new_token.to_string()) {
+            Ok(_) => info!(
+                "Nuevo PIN generado y guardado en '{}': {}",
+                AUTH_FILE, new_token
+            ),
+            Err(e) => warn!(
+                "Se generó el PIN {}, pero no se pudo guardar en disco: {}",
+                new_token, e
+            ),
+        }
+
+        new_token
+    }
+
+    /// Genera un número aleatorio de 6 dígitos (100000 - 999999)
+    fn generate_random_pin() -> u32 {
+        let mut rng = rand::rng();
+        rng.random_range(100_000..=999_999)
     }
 }
