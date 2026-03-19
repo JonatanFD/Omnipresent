@@ -31,8 +31,12 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
-/** Minimum pixel delta to exit the UNDECIDED state and commit to a gesture. */
-private const val GESTURE_SLOP = 3f
+/**
+ * Accumulated pixel delta required to exit UNDECIDED and commit to a gesture.
+ * Compared against the running sum of per-frame deltas, NOT against individual
+ * frame deltas. This lets slow, precise movements lock intent reliably.
+ */
+private const val GESTURE_SLOP_ACCUMULATED = 8f
 
 /** Minimum accumulated delta to fire a 3-finger swipe action. */
 private const val THREE_FINGER_SWIPE_THRESHOLD = 30f
@@ -182,6 +186,16 @@ private suspend fun AwaitPointerEventScope.handleGesture(
 
     var intent = GestureIntent.UNDECIDED
     var maxPointers = 1
+
+    // ── Slop accumulator — intent detection only ──────────────────────────────
+    // We sum per-frame deltas until we cross GESTURE_SLOP_ACCUMULATED, then lock
+    // the intent. Using an accumulator instead of a per-frame check means slow,
+    // precise movements will always lock intent — they just take a few more frames.
+    // The individual delta size is completely irrelevant for locking intent.
+    var slopAccumX = 0f
+    var slopAccumY = 0f
+
+    // ── 3-finger swipe accumulator ────────────────────────────────────────────
     var swipeAccumX = 0f
     var swipeAccumY = 0f
     var swipeDispatched = false
@@ -198,47 +212,67 @@ private suspend fun AwaitPointerEventScope.handleGesture(
         if (activeCount == 0) break // All fingers lifted — exit movement loop.
         if (activeCount > maxPointers) maxPointers = activeCount
 
-        // Average delta across all active pointers.
+        // Average delta across all active pointers (allocation-free Compose API).
         val pan = event.calculatePan()
         val dx = pan.x
         val dy = pan.y
-        val hasMeaningfulMove = abs(dx) > GESTURE_SLOP || abs(dy) > GESTURE_SLOP
 
-        // Lock intent the first time we exceed the slop threshold.
-        if (intent == GestureIntent.UNDECIDED && hasMeaningfulMove) {
+        // Accumulate for slop check. Even 0.1f/frame adds up correctly across
+        // many frames, so slow precise movements eventually lock intent.
+        slopAccumX += dx
+        slopAccumY += dy
+
+        // Lock intent once the accumulated travel clears the threshold.
+        // Evaluated BEFORE dispatching so the locking frame sends its delta too.
+        if (intent == GestureIntent.UNDECIDED &&
+            (abs(slopAccumX) > GESTURE_SLOP_ACCUMULATED ||
+                    abs(slopAccumY) > GESTURE_SLOP_ACCUMULATED)
+        ) {
             intent = when (activeCount) {
-                2    -> GestureIntent.SCROLL
-                3    -> GestureIntent.THREE_SWIPE
+                2 -> GestureIntent.SCROLL
+                3 -> GestureIntent.THREE_SWIPE
                 else -> GestureIntent.CURSOR_MOVE
             }
         }
 
         when (intent) {
             // ── 1-finger move → cursor ───────────────────────────────────────
+            // KEY FIX: dispatch every non-zero frame delta, no per-frame threshold.
+            // The host cursor must accumulate every tiny nudge for precise control.
             GestureIntent.CURSOR_MOVE -> {
                 changes.fastForEach { if (it.pressed) it.consume() }
-                if (hasMeaningfulMove) {
-                    send(buildMessage(token, getSeq(), dx, dy,
-                        TrackpadMessage.ActionType.NO_ACTION,
-                        TrackpadMessage.PhaseType.UPDATE))
+                if (dx != 0f || dy != 0f) {
+                    send(
+                        buildMessage(
+                            token, getSeq(), dx, dy,
+                            TrackpadMessage.ActionType.NO_ACTION,
+                            TrackpadMessage.PhaseType.UPDATE
+                        )
+                    )
                 }
             }
 
             // ── 2-finger move → scroll ───────────────────────────────────────
+            // Same principle: no per-frame size gate once intent is locked.
             GestureIntent.SCROLL -> {
                 changes.fastForEach { if (it.pressed) it.consume() }
-                if (hasMeaningfulMove) {
-                    // Determine axis dominance per-event so diagonal drags feel natural.
+                if (dx != 0f || dy != 0f) {
                     val action = if (abs(dy) >= abs(dx))
                         TrackpadMessage.ActionType.VERTICAL_SCROLL
                     else
                         TrackpadMessage.ActionType.HORIZONTAL_SCROLL
-                    send(buildMessage(token, getSeq(), dx, dy,
-                        action, TrackpadMessage.PhaseType.UPDATE))
+                    send(
+                        buildMessage(
+                            token, getSeq(), dx, dy,
+                            action, TrackpadMessage.PhaseType.UPDATE
+                        )
+                    )
                 }
             }
 
             // ── 3-finger move → directional swipe (fire-once) ────────────────
+            // Uses its own accumulator for direction; individual delta size
+            // doesn't matter — we just need enough travel to pick an axis.
             GestureIntent.THREE_SWIPE -> {
                 changes.fastForEach { if (it.pressed) it.consume() }
                 swipeAccumX += dx
@@ -253,12 +287,17 @@ private suspend fun AwaitPointerEventScope.handleGesture(
                         abs(swipeAccumX) > abs(swipeAccumY) ->
                             if (swipeAccumX > 0) TrackpadMessage.ActionType.SWIPE_RIGHT
                             else TrackpadMessage.ActionType.SWIPE_LEFT
+
                         else ->
                             if (swipeAccumY > 0) TrackpadMessage.ActionType.SWIPE_DOWN
                             else TrackpadMessage.ActionType.SWIPE_UP
                     }
-                    send(buildMessage(token, getSeq(), 0f, 0f,
-                        action, TrackpadMessage.PhaseType.START))
+                    send(
+                        buildMessage(
+                            token, getSeq(), 0f, 0f,
+                            action, TrackpadMessage.PhaseType.START
+                        )
+                    )
                 }
             }
 
@@ -284,9 +323,13 @@ private suspend fun AwaitPointerEventScope.handleGesture(
             } ?: return // Timeout: this was just a normal click, we're done.
 
             // ③ Second finger-down within the window → Double-tap drag begins.
-            send(buildMessage(token, getSeq(), 0f, 0f,
-                TrackpadMessage.ActionType.DOUBLE_CLICK,
-                TrackpadMessage.PhaseType.START))
+            send(
+                buildMessage(
+                    token, getSeq(), 0f, 0f,
+                    TrackpadMessage.ActionType.DOUBLE_CLICK,
+                    TrackpadMessage.PhaseType.START
+                )
+            )
 
             while (true) {
                 val dragEvent = awaitPointerEvent()
@@ -300,16 +343,24 @@ private suspend fun AwaitPointerEventScope.handleGesture(
                 dragChanges.fastForEach { if (it.pressed) it.consume() }
 
                 if (abs(dragPan.x) > 0f || abs(dragPan.y) > 0f) {
-                    send(buildMessage(token, getSeq(), dragPan.x, dragPan.y,
-                        TrackpadMessage.ActionType.NO_ACTION,
-                        TrackpadMessage.PhaseType.UPDATE))
+                    send(
+                        buildMessage(
+                            token, getSeq(), dragPan.x, dragPan.y,
+                            TrackpadMessage.ActionType.NO_ACTION,
+                            TrackpadMessage.PhaseType.UPDATE
+                        )
+                    )
                 }
             }
 
             // ④ Finger lifted: release the held button.
-            send(buildMessage(token, getSeq(), 0f, 0f,
-                TrackpadMessage.ActionType.DOUBLE_CLICK,
-                TrackpadMessage.PhaseType.END))
+            send(
+                buildMessage(
+                    token, getSeq(), 0f, 0f,
+                    TrackpadMessage.ActionType.DOUBLE_CLICK,
+                    TrackpadMessage.PhaseType.END
+                )
+            )
         }
     }
 }
