@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package network_protocol;
+
+message TrackpadMessage {
+  string device_name = 1;
+  float delta_x = 2;
+  float delta_y = 3;
+
+  enum ActionType {
+    NO_ACTION = 0;
+    RIGHT_CLICK = 1;
+    LEFT_CLICK = 2;
+    HORIZONTAL_SCROLL = 3;
+    VERTICAL_SCROLL = 4;
+    SWIPE_LEFT = 5;
+    SWIPE_RIGHT = 6;
+    SWIPE_UP = 7;
+    SWIPE_DOWN = 8;
+  }
+
+  ActionType action = 4;
+
+  enum PhaseType {
+    NONE = 0;
+    START = 1;
+    UPDATE = 2;
+    END = 3;
+  }
+
+  PhaseType phase = 5;
+
+  uint64 timestamp = 6;
+
+  uint32 auth_token = 7;
+
+  uint32 sequence_number = 8;
+}
