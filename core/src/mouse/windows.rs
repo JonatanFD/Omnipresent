@@ -4,7 +4,7 @@ use std::mem::size_of;
 use std::thread;
 use std::time::Duration;
 
-// Importaciones nativas de Microsoft para Mouse y Teclado
+// Native Microsoft imports for mouse and keyboard
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
     MOUSE_EVENT_FLAGS, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
@@ -13,7 +13,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 
 const SCROLL_THRESHOLD: f32 = 15.0;
-// En Windows, 1 "clic" de la rueda del ratón equivale a 120 (WHEEL_DELTA)
+// In Windows, one wheel "tick" equals 120 (WHEEL_DELTA)
 const WHEEL_DELTA: i32 = 120;
 
 pub struct WindowsMouseStrategy {
@@ -29,7 +29,7 @@ impl WindowsMouseStrategy {
         }
     }
 
-    /// Simula un evento de Mouse en Windows
+    /// Simulates a mouse event in Windows
     fn send_mouse_input(dx: i32, dy: i32, mouse_data: u32, flags: MOUSE_EVENT_FLAGS) {
         let input = INPUT {
             r#type: INPUT_MOUSE,
@@ -49,7 +49,7 @@ impl WindowsMouseStrategy {
         }
     }
 
-    /// Simula un evento de Teclado en Windows (Para los Swipes)
+    /// Simulates a keyboard event in Windows (for swipe gestures)
     fn send_keyboard_input(vk: VIRTUAL_KEY, key_up: bool) {
         let flags = if key_up {
             KEYEVENTF_KEYUP
@@ -112,9 +112,9 @@ impl MouseStrategy for WindowsMouseStrategy {
                 self.scroll_accumulator_y += dy;
                 if self.scroll_accumulator_y.abs() >= SCROLL_THRESHOLD {
                     let scroll_direction = if self.scroll_accumulator_y > 0.0 {
-                        WHEEL_DELTA // Sube
+                        WHEEL_DELTA // Scroll up
                     } else {
-                        -WHEEL_DELTA // Baja
+                        -WHEEL_DELTA // Scroll down
                     };
                     Self::send_mouse_input(0, 0, scroll_direction as u32, MOUSEEVENTF_WHEEL);
                     self.scroll_accumulator_y %= SCROLL_THRESHOLD;
@@ -125,16 +125,16 @@ impl MouseStrategy for WindowsMouseStrategy {
                 self.scroll_accumulator_x += dx;
                 if self.scroll_accumulator_x.abs() >= SCROLL_THRESHOLD {
                     let scroll_direction = if self.scroll_accumulator_x > 0.0 {
-                        -WHEEL_DELTA // Izquierda
+                        -WHEEL_DELTA // Scroll left
                     } else {
-                        WHEEL_DELTA // Derecha
+                        WHEEL_DELTA // Scroll right
                     };
                     Self::send_mouse_input(0, 0, scroll_direction as u32, MOUSEEVENTF_HWHEEL);
                     self.scroll_accumulator_x %= SCROLL_THRESHOLD;
                 }
             }
 
-            // Gesto: Mostrar todas las ventanas (Task View) -> Win + Tab
+            // Gesture: show Task View (all windows) -> Win + Tab
             ActionType::SwipeUp | ActionType::SwipeDown => {
                 Self::send_keyboard_input(VK_LWIN, false);
                 Self::send_keyboard_input(VK_TAB, false);
@@ -143,7 +143,7 @@ impl MouseStrategy for WindowsMouseStrategy {
                 Self::send_keyboard_input(VK_LWIN, true);
             }
 
-            // Gesto: Cambiar al escritorio virtual de la Derecha -> Ctrl + Win + Flecha Derecha
+            // Gesture: switch to the virtual desktop on the right -> Ctrl + Win + Right Arrow
             ActionType::SwipeLeft => {
                 Self::send_keyboard_input(VK_LCONTROL, false);
                 Self::send_keyboard_input(VK_LWIN, false);
@@ -154,7 +154,7 @@ impl MouseStrategy for WindowsMouseStrategy {
                 Self::send_keyboard_input(VK_LCONTROL, true);
             }
 
-            // Gesto: Cambiar al escritorio virtual de la Izquierda -> Ctrl + Win + Flecha Izquierda
+            // Gesture: switch to the virtual desktop on the left -> Ctrl + Win + Left Arrow
             ActionType::SwipeRight => {
                 Self::send_keyboard_input(VK_LCONTROL, false);
                 Self::send_keyboard_input(VK_LWIN, false);
@@ -170,7 +170,7 @@ impl MouseStrategy for WindowsMouseStrategy {
                 self.scroll_accumulator_x = 0.0;
             }
 
-            // Cubrimos cualquier otra acción del enum por seguridad
+            // Fallback for any unhandled future enum variants
             _ => {}
         }
     }

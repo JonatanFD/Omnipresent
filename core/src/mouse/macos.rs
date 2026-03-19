@@ -1,7 +1,7 @@
 use crate::mouse::strategy::MouseStrategy;
 use crate::network::{ActionType, PhaseType};
 
-// Importamos la librería de alto nivel Enigo (v0.6.1) y su enum Axis
+// High-level Enigo library (v0.6.1) and Axis enum
 use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use std::thread;
 use std::time::Duration;
@@ -14,8 +14,8 @@ pub struct MacOsMouseStrategy {
 
 impl MacOsMouseStrategy {
     pub fn new() -> Self {
-        // Inicializamos Enigo con la configuración por defecto
-        let enigo = Enigo::new(&Settings::default()).expect("FATAL: No se pudo inicializar Enigo");
+        // Initialize Enigo with default configuration
+        let enigo = Enigo::new(&Settings::default()).expect("FATAL: Failed to initialize Enigo");
 
         Self {
             enigo,
@@ -24,7 +24,7 @@ impl MacOsMouseStrategy {
         }
     }
 
-    /// Presiona la tecla Control, luego da un toque a la Flecha, y suelta Control
+    /// Press Control, then tap the arrow key, and finally release Control
     fn send_shortcut(&mut self, key: Key) {
         let _ = self.enigo.key(Key::Control, Direction::Press);
         thread::sleep(Duration::from_millis(20));
@@ -36,8 +36,8 @@ impl MacOsMouseStrategy {
 
 impl MouseStrategy for MacOsMouseStrategy {
     fn move_cursor(&mut self, delta_x: f32, delta_y: f32) {
-        // Coordinate::Rel mueve el ratón de forma relativa a donde está ahora.
-        // Enigo maneja automáticamente si el botón está presionado para hacer el "Arrastre".
+        // Coordinate::Rel moves the mouse relative to the current position.
+        // Enigo automatically handles whether a button is pressed for dragging.
         let _ = self
             .enigo
             .move_mouse(delta_x as i32, delta_y as i32, Coordinate::Rel);
@@ -45,7 +45,7 @@ impl MouseStrategy for MacOsMouseStrategy {
 
     fn execute_action(&mut self, action: ActionType, phase: PhaseType, dx: f32, dy: f32) {
         match action {
-            // Manejo de Clic Izquierdo (Start = Presionar, End = Soltar, Otro = Clic rápido)
+            // Left click handling (Start = Press, End = Release, Other = quick Click)
             ActionType::LeftClick => match phase {
                 PhaseType::Start => {
                     let _ = self.enigo.button(Button::Left, Direction::Press);
@@ -58,7 +58,7 @@ impl MouseStrategy for MacOsMouseStrategy {
                 }
             },
 
-            // Manejo de Clic Derecho
+            // Right click handling
             ActionType::RightClick => match phase {
                 PhaseType::Start => {
                     let _ = self.enigo.button(Button::Right, Direction::Press);
@@ -71,24 +71,24 @@ impl MouseStrategy for MacOsMouseStrategy {
                 }
             },
 
-            // Manejo del Scroll (Con la corrección de Axis para Enigo 0.6.1)
+            // Scroll handling (with Axis correction for Enigo 0.6.1)
             ActionType::VerticalScroll | ActionType::HorizontalScroll => {
                 self.scroll_accumulator_y += dy;
                 self.scroll_accumulator_x += dx;
 
-                let threshold = 5.0; // Sensibilidad del scroll
+                let threshold = 5.0; // Scroll sensitivity
 
-                // Evaluamos y ejecutamos el Scroll Vertical
+                // Evaluate and perform vertical scroll
                 if self.scroll_accumulator_y.abs() >= threshold {
                     let scroll_y = (self.scroll_accumulator_y / threshold).trunc() as i32;
                     self.scroll_accumulator_y %= threshold;
 
-                    // Si notas que el scroll va al revés (por el Natural Scrolling de Mac),
-                    // cambia 'scroll_y' por '-scroll_y'
+                    // If scroll feels inverted due to macOS "Natural Scrolling",
+                    // replace 'scroll_y' with '-scroll_y'
                     let _ = self.enigo.scroll(-scroll_y, Axis::Vertical);
                 }
 
-                // Evaluamos y ejecutamos el Scroll Horizontal
+                // Evaluate and perform horizontal scroll
                 if self.scroll_accumulator_x.abs() >= threshold {
                     let scroll_x = (self.scroll_accumulator_x / threshold).trunc() as i32;
                     self.scroll_accumulator_x %= threshold;
@@ -97,11 +97,11 @@ impl MouseStrategy for MacOsMouseStrategy {
                 }
             }
 
-            // Mapeamos los Swipes a las teclas Control + Flechas (Mission Control / Escritorios)
+            // Map swipes to Control + Arrow shortcuts (Mission Control / Desktops)
             ActionType::SwipeUp => self.send_shortcut(Key::UpArrow),
             ActionType::SwipeDown => self.send_shortcut(Key::DownArrow),
 
-            // Invertimos Izquierda/Derecha intencionalmente para que coincida con el gesto natural de la mano
+            // Invert Left/Right intentionally to match natural hand gesture
             ActionType::SwipeLeft => self.send_shortcut(Key::RightArrow),
             ActionType::SwipeRight => self.send_shortcut(Key::LeftArrow),
 
@@ -110,7 +110,7 @@ impl MouseStrategy for MacOsMouseStrategy {
                 self.scroll_accumulator_x = 0.0;
             }
 
-            // Catch-all por si el Enum ActionType crece en el futuro
+            // Catch-all in case ActionType grows in the future
             _ => {}
         }
     }

@@ -16,26 +16,26 @@ impl MouseStrategyFactory {
     pub fn create() -> Box<dyn MouseStrategy> {
         #[cfg(target_os = "linux")]
         {
-            info!("Compilado para Linux. Instanciando LinuxMouseStrategy.");
+            info!("Running on Linux. Using LinuxMouseStrategy.");
             Box::new(LinuxMouseStrategy::new())
         }
 
         #[cfg(target_os = "windows")]
         {
-            info!("Compilado para Windows. Instanciando WindowsMouseStrategy.");
+            info!("Running on Windows. Using WindowsMouseStrategy.");
             Box::new(WindowsMouseStrategy::new())
         }
 
         #[cfg(target_os = "macos")]
         {
-            info!("Compilado para macOS. Instanciando MacOsMouseStrategy.");
+            info!("Running on macOS. Using MacOsMouseStrategy.");
             Box::new(MacOsMouseStrategy::new())
         }
 
-        // Fallback si intentas compilar en algo raro como FreeBSD o Android
+        // Fallback if compiled on an unsupported operating system (for example FreeBSD or Android)
         #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
         {
-            panic!("Sistema operativo no soportado nativamente.");
+            panic!("Unsupported operating system.");
         }
     }
 }

@@ -14,12 +14,12 @@ use std::env;
 use std::io;
 use tokio::sync::mpsc;
 
-// Libraries for QR Popup
+// Libraries for QR popup
 use image::Rgb;
 use local_ip_address::local_ip;
 use qrcode::QrCode;
 
-// Guaranteed fixed port
+// Fixed server port
 const SERVER_PORT: u16 = 9090;
 
 #[tokio::main]
@@ -27,9 +27,9 @@ async fn main() -> io::Result<()> {
     // Initialize logger
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
-    info!("Starting Omnipresent Server...");
+    info!("Starting Omnipresent server");
 
-    // Check if terminal requested PIN reset or QR display
+    // Check CLI flags to reset PIN or show QR
     let args: Vec<String> = env::args().collect();
     let force_reset = args.contains(&String::from("--reset-pin"));
     let show_qr = args.contains(&String::from("--qr")) || args.contains(&String::from("-qr"));
@@ -40,7 +40,7 @@ async fn main() -> io::Result<()> {
     // 1. Start server with fixed port
     let mut server = OmnipresentServer::bind(tx, SERVER_PORT).await?;
 
-    // 2. Load saved PIN (or create a new one with SystemTime)
+    // 2. Load saved PIN (or create a new one)
     let secure_pin = AuthInfo::get_or_create_token(force_reset);
     server.set_token(secure_pin);
 
@@ -48,8 +48,10 @@ async fn main() -> io::Result<()> {
     let discovery_port = SERVER_PORT;
     let discovery_token = secure_pin;
     tokio::spawn(async move {
-        if let Err(e) = OmnipresentServer::start_discovery_service(discovery_port, discovery_token).await {
-            error!("Error in discovery service: {}", e);
+        if let Err(e) =
+            OmnipresentServer::start_discovery_service(discovery_port, discovery_token).await
+        {
+            error!("Discovery service failed: {}", e);
         }
     });
 
@@ -58,7 +60,7 @@ async fn main() -> io::Result<()> {
         Ok(my_local_ip) => {
             info!("Local IP detected: {}", my_local_ip);
             if show_qr {
-                // Call function that creates and opens PNG image
+                // Generate and open PNG image
                 show_qr_popup(&my_local_ip.to_string(), SERVER_PORT, secure_pin);
             } else {
                 info!("Run with --qr to display the pairing QR code");
@@ -75,7 +77,7 @@ async fn main() -> io::Result<()> {
         let strategy = MouseStrategyFactory::create();
         let mut controller = InputController::new(strategy);
 
-        info!("Input Controller Started. Listening for movements...");
+        info!("Input controller started and listening");
 
         while let Some(msg) = rx.blocking_recv() {
             let action = msg.action();
@@ -86,7 +88,7 @@ async fn main() -> io::Result<()> {
                 controller.move_mouse(msg.delta_x, msg.delta_y);
             }
 
-            // Actions (Clicks, Scrolls, Swipes)
+            // Actions (clicks, scrolls, swipes)
             if action != ActionType::NoAction {
                 controller.execute_action(action, phase, msg.delta_x, msg.delta_y);
             }
@@ -94,11 +96,14 @@ async fn main() -> io::Result<()> {
     });
 
     // 6. Keep UDP server listening asynchronously
-    info!("Server ready. Listening on port {}, PIN: {}", SERVER_PORT, secure_pin);
+    info!(
+        "Server is ready. Listening on port {} with PIN {}",
+        SERVER_PORT, secure_pin
+    );
     server.run().await
 }
 
-/// Function that generates a PNG file with the QR and opens it using `opener`
+/// Generates a PNG file with the QR code and opens it using `opener`.
 fn show_qr_popup(ip: &str, port: u16, pin: u32) {
     // 1. Prepare data with omnipresent://IP:PORT/?token=PIN format
     let qr_data = format!("omnipresent://{}:{}/?token={}", ip, port, pin);
@@ -131,16 +136,13 @@ fn show_qr_popup(ip: &str, port: u16, pin: u32) {
         return;
     }
 
-    info!("Temporary QR code generated at: {}", path.display());
+    info!("Temporary QR code generated at {}", path.display());
 
     // 6. Open image with system default viewer using `opener`
     if let Err(e) = opener::open(&path) {
-        error!("Could not open QR popup image: {}", e);
-        info!(
-            "But you can open it manually by navigating to: {}",
-            path.display()
-        );
+        error!("Could not open QR image: {}", e);
+        info!("Open the file manually at {}", path.display());
     } else {
-        info!("QR popup window opened successfully!");
+        info!("QR popup window opened");
     }
 }
