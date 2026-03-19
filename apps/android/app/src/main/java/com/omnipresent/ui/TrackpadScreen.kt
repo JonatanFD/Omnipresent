@@ -5,6 +5,7 @@ import android.content.pm.ActivityInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExitToApp
@@ -15,32 +16,39 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerEvent
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.fastForEach
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.omnipresent.network.UdpClient
 import com.omnipresent.protocol.TrackpadMessage
 import com.omnipresent.protocol.trackpadMessage
-import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
-// 1. Eliminamos LONG_PRESS_DRAG
+/** Minimum pixel delta to exit the UNDECIDED state and commit to a gesture. */
+private const val GESTURE_SLOP = 3f
+
+/** Minimum accumulated delta to fire a 3-finger swipe action. */
+private const val THREE_FINGER_SWIPE_THRESHOLD = 30f
+
+/**
+ * Represents what the user appears to be doing once the slop threshold is
+ * crossed. Using a plain enum (not AtomicReference) is correct here because
+ * [awaitEachGesture] runs entirely on a single coroutine — no cross-thread
+ * mutation ever occurs.
+ */
 private enum class GestureIntent {
     UNDECIDED,
     CURSOR_MOVE,
     SCROLL,
-    THREE_SWIPE
+    THREE_SWIPE,
 }
-
-private const val GESTURE_SLOP = 3f
 
 @Composable
 fun TrackpadScreen(
@@ -48,272 +56,100 @@ fun TrackpadScreen(
     port: Int,
     token: Int,
     onExit: () -> Unit,
-    onScanNewQr: () -> Unit
+    onScanNewQr: () -> Unit,
 ) {
-    val coroutineScope = rememberCoroutineScope()
-    val udpClient = remember { UdpClient(ip, port) }
+    val context = LocalContext.current
+    val doubleTapTimeoutMs = LocalViewConfiguration.current.doubleTapTimeoutMillis
+
+    // Re-create the UDP client when the target changes, not on every recomposition.
+    val udpClient = remember(ip, port) { UdpClient(ip, port) }
     var showMenu by remember { mutableStateOf(false) }
 
-    val viewConfig = LocalViewConfiguration.current
-    val doubleTapTimeoutMs = viewConfig.doubleTapTimeoutMillis
+    // Channel decouples the UI-thread gesture handler from blocking network I/O.
+    val messageChannel = remember { Channel<TrackpadMessage>(Channel.UNLIMITED) }
 
-    val context = LocalContext.current
+    // Plain IntArray avoids recomposition triggers while still being a stable
+    // heap reference that survives across lambda captures.
+    val seqCounter = remember { intArrayOf(0) }
+
+    // ── Network dispatcher ────────────────────────────────────────────────────
+    LaunchedEffect(messageChannel) {
+        for (msg in messageChannel) {
+            udpClient.send(msg)
+        }
+    }
+
+    // ── Fullscreen landscape setup ────────────────────────────────────────────
     DisposableEffect(Unit) {
         val activity = context as? Activity
         val window = activity?.window
-        val originalOrientation = activity?.requestedOrientation
-            ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        val originalOrientation =
+            activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE
-
-        if (window != null) {
-            val ctrl = WindowCompat.getInsetsController(window, window.decorView)
-            ctrl.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            ctrl.hide(WindowInsetsCompat.Type.systemBars())
+        window?.let {
+            WindowCompat.getInsetsController(it, it.decorView).apply {
+                systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                hide(WindowInsetsCompat.Type.systemBars())
+            }
         }
 
         onDispose {
+            messageChannel.close()
             udpClient.close()
             activity?.requestedOrientation = originalOrientation
-            if (window != null) {
-                WindowCompat.getInsetsController(window, window.decorView)
+            window?.let {
+                WindowCompat.getInsetsController(it, it.decorView)
                     .show(WindowInsetsCompat.Type.systemBars())
             }
         }
     }
 
+    // ── UI ────────────────────────────────────────────────────────────────────
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF121212))
-            .pointerInput(Unit) {
+            // KEY on `token` so the gesture handler is reinstalled on session change.
+            // Keying on `Unit` would keep a stale closure if the session rotates.
+            .pointerInput(token) {
                 awaitEachGesture {
-
-                    val intentRef = AtomicReference(GestureIntent.UNDECIDED)
-
-                    fun tryLockIntent(newIntent: GestureIntent): Boolean =
-                        intentRef.compareAndSet(GestureIntent.UNDECIDED, newIntent)
-
-                    var maxPointers = 0
-                    var swipeDx = 0f
-                    var swipeDy = 0f
-                    var swipeDispatched = false
-
-                    // Phase 1: initial touch
-                    awaitFirstDown(requireUnconsumed = false)
-                    maxPointers = 1
-
-                    // 2. Eliminamos el longPressJob por completo.
-
-                    while (true) {
-                        val event: PointerEvent = awaitPointerEvent(PointerEventPass.Main)
-                        val active = event.changes.filter { it.pressed }
-                        val numFingers = active.size
-
-                        if (numFingers > maxPointers) maxPointers = numFingers
-                        if (numFingers == 0) break
-
-                        var avgDx = 0f
-                        var avgDy = 0f
-                        active.forEach { p ->
-                            val d = p.positionChange()
-                            avgDx += d.x
-                            avgDy += d.y
-                        }
-                        avgDx /= numFingers
-                        avgDy /= numFingers
-
-                        val hasMeaningfulMove =
-                            abs(avgDx) > GESTURE_SLOP || abs(avgDy) > GESTURE_SLOP
-
-                        if (hasMeaningfulMove && intentRef.get() == GestureIntent.UNDECIDED) {
-                            val newIntent = when (numFingers) {
-                                2 -> GestureIntent.SCROLL
-                                3 -> GestureIntent.THREE_SWIPE
-                                else -> GestureIntent.CURSOR_MOVE
-                            }
-                            tryLockIntent(newIntent)
-                        }
-
-                        when (intentRef.get()) {
-                            GestureIntent.CURSOR_MOVE -> {
-                                active.forEach { it.consume() }
-                                coroutineScope.launch {
-                                    udpClient.send(
-                                        createMessage(
-                                            token,
-                                            dx = avgDx, dy = avgDy,
-                                            action = TrackpadMessage.ActionType.NO_ACTION,
-                                            phase = TrackpadMessage.PhaseType.UPDATE
-                                        )
-                                    )
-                                }
-                            }
-
-                            GestureIntent.SCROLL -> {
-                                active.forEach { it.consume() }
-                                val scrollAction =
-                                    if (abs(avgDy) > abs(avgDx))
-                                        TrackpadMessage.ActionType.VERTICAL_SCROLL
-                                    else
-                                        TrackpadMessage.ActionType.HORIZONTAL_SCROLL
-
-                                coroutineScope.launch {
-                                    udpClient.send(
-                                        createMessage(
-                                            token,
-                                            dx = avgDx, dy = avgDy,
-                                            action = scrollAction,
-                                            phase = TrackpadMessage.PhaseType.UPDATE
-                                        )
-                                    )
-                                }
-                            }
-
-                            GestureIntent.THREE_SWIPE -> {
-                                active.forEach { it.consume() }
-                                swipeDx += avgDx
-                                swipeDy += avgDy
-
-                                if (!swipeDispatched &&
-                                    (abs(swipeDx) > 30f || abs(swipeDy) > 30f)
-                                ) {
-                                    swipeDispatched = true
-                                    val swipeAction =
-                                        if (abs(swipeDx) > abs(swipeDy))
-                                            if (swipeDx > 0) TrackpadMessage.ActionType.SWIPE_RIGHT
-                                            else TrackpadMessage.ActionType.SWIPE_LEFT
-                                        else
-                                            if (swipeDy > 0) TrackpadMessage.ActionType.SWIPE_DOWN
-                                            else TrackpadMessage.ActionType.SWIPE_UP
-
-                                    coroutineScope.launch {
-                                        udpClient.send(
-                                            createMessage(
-                                                token,
-                                                action = swipeAction,
-                                                phase = TrackpadMessage.PhaseType.START
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-
-                            GestureIntent.UNDECIDED -> {}
-                        }
-                    }
-
-                    // Phase 3: resolve tap gestures (no movement)
-                    when {
-                        intentRef.get() == GestureIntent.UNDECIDED && maxPointers == 2 -> {
-                            coroutineScope.launch {
-                                udpClient.sendClick(token, TrackpadMessage.ActionType.RIGHT_CLICK)
-                            }
-                        }
-
-                        intentRef.get() == GestureIntent.UNDECIDED && maxPointers == 1 -> {
-                            val secondDown = withTimeoutOrNull(doubleTapTimeoutMs) {
-                                awaitFirstDown(requireUnconsumed = false)
-                            }
-
-                            if (secondDown != null) {
-                                // 3. ¡Es un doble tap! Iniciamos el evento sin cerrarlo.
-                                coroutineScope.launch {
-                                    udpClient.send(
-                                        createMessage(
-                                            token,
-                                            action = TrackpadMessage.ActionType.DOUBLE_CLICK,
-                                            phase = TrackpadMessage.PhaseType.START
-                                        )
-                                    )
-                                }
-
-                                // 4. Rastrear si el usuario mueve el dedo (arrastra/selecciona)
-                                while (true) {
-                                    val event = awaitPointerEvent(PointerEventPass.Main)
-                                    val active = event.changes.filter { it.pressed }
-                                    if (active.isEmpty()) break
-
-                                    var avgDx = 0f
-                                    var avgDy = 0f
-                                    active.forEach { p ->
-                                        val d = p.positionChange()
-                                        avgDx += d.x
-                                        avgDy += d.y
-                                        p.consume()
-                                    }
-
-                                    if (active.isNotEmpty()) {
-                                        avgDx /= active.size
-                                        avgDy /= active.size
-
-                                        if (abs(avgDx) > 0f || abs(avgDy) > 0f) {
-                                            coroutineScope.launch {
-                                                udpClient.send(
-                                                    createMessage(
-                                                        token,
-                                                        dx = avgDx, dy = avgDy,
-                                                        action = TrackpadMessage.ActionType.NO_ACTION,
-                                                        phase = TrackpadMessage.PhaseType.UPDATE
-                                                    )
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 5. El usuario soltó el dedo, terminamos el evento.
-                                coroutineScope.launch {
-                                    udpClient.send(
-                                        createMessage(
-                                            token,
-                                            action = TrackpadMessage.ActionType.DOUBLE_CLICK,
-                                            phase = TrackpadMessage.PhaseType.END
-                                        )
-                                    )
-                                }
-                            } else {
-                                // No hubo un segundo toque a tiempo -> Clic normal
-                                coroutineScope.launch {
-                                    udpClient.sendClick(token, TrackpadMessage.ActionType.LEFT_CLICK)
-                                }
-                            }
-                        }
-                    }
+                    handleGesture(
+                        token = token,
+                        doubleTapTimeoutMs = doubleTapTimeoutMs,
+                        getSeq = { seqCounter[0]++ },
+                        send = { messageChannel.trySend(it) },
+                    )
                 }
-            }
+            },
     ) {
-        // ... (El bloque visual Box y DropdownMenu se mantiene exactamente igual) ...
         Box(
             modifier = Modifier
                 .safeDrawingPadding()
                 .padding(16.dp)
-                .align(Alignment.TopStart)
+                .align(Alignment.TopStart),
         ) {
             IconButton(
                 onClick = { showMenu = true },
                 colors = IconButtonDefaults.iconButtonColors(
                     containerColor = Color.White.copy(alpha = 0.1f),
-                    contentColor = Color.White
-                )
+                    contentColor = Color.White,
+                ),
             ) {
                 Icon(Icons.Default.Menu, contentDescription = "Menu")
             }
 
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false }
-            ) {
+            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                 DropdownMenuItem(
                     text = { Text("Scan QR") },
                     onClick = { showMenu = false; onScanNewQr() },
-                    leadingIcon = { Icon(Icons.Default.QrCodeScanner, contentDescription = null) }
+                    leadingIcon = { Icon(Icons.Default.QrCodeScanner, contentDescription = null) },
                 )
                 DropdownMenuItem(
                     text = { Text("Exit") },
                     onClick = { showMenu = false; onExit() },
-                    leadingIcon = { Icon(Icons.Default.ExitToApp, contentDescription = null) }
+                    leadingIcon = { Icon(Icons.Default.ExitToApp, contentDescription = null) },
                 )
             }
         }
@@ -322,31 +158,187 @@ fun TrackpadScreen(
             text = "Trackpad Active",
             style = MaterialTheme.typography.bodyLarge,
             color = Color.White.copy(alpha = 0.2f),
-            modifier = Modifier.align(Alignment.Center)
+            modifier = Modifier.align(Alignment.Center),
         )
     }
 }
 
-// ... (sendClick y createMessage se mantienen igual) ...
-// Sends a full click (press + release)
-private suspend fun UdpClient.sendClick(token: Int, action: TrackpadMessage.ActionType) {
-    send(createMessage(token, action = action, phase = TrackpadMessage.PhaseType.START))
-    send(createMessage(token, action = action, phase = TrackpadMessage.PhaseType.END))
+// ─────────────────────────────────────────────────────────────────────────────
+// Core gesture handler
+//
+// Extracted into its own AwaitPointerEventScope extension for two reasons:
+//   1. The TrackpadScreen composable stays readable.
+//   2. The logic can be unit-tested independently of the composable.
+// ─────────────────────────────────────────────────────────────────────────────
+
+private suspend fun AwaitPointerEventScope.handleGesture(
+    token: Int,
+    doubleTapTimeoutMs: Long,
+    getSeq: () -> Int,
+    send: (TrackpadMessage) -> Unit,
+) {
+    // ── Phase 1: wait for the first finger ───────────────────────────────────
+    awaitFirstDown(requireUnconsumed = false)
+
+    var intent = GestureIntent.UNDECIDED
+    var maxPointers = 1
+    var swipeAccumX = 0f
+    var swipeAccumY = 0f
+    var swipeDispatched = false
+
+    // ── Phase 2: movement tracking ───────────────────────────────────────────
+    while (true) {
+        val event = awaitPointerEvent() // PointerEventPass.Main is the default
+        val changes = event.changes
+
+        // Count live pointers without allocating a filtered list.
+        var activeCount = 0
+        changes.fastForEach { if (it.pressed) activeCount++ }
+
+        if (activeCount == 0) break // All fingers lifted — exit movement loop.
+        if (activeCount > maxPointers) maxPointers = activeCount
+
+        // Average delta across all active pointers.
+        val pan = event.calculatePan()
+        val dx = pan.x
+        val dy = pan.y
+        val hasMeaningfulMove = abs(dx) > GESTURE_SLOP || abs(dy) > GESTURE_SLOP
+
+        // Lock intent the first time we exceed the slop threshold.
+        if (intent == GestureIntent.UNDECIDED && hasMeaningfulMove) {
+            intent = when (activeCount) {
+                2    -> GestureIntent.SCROLL
+                3    -> GestureIntent.THREE_SWIPE
+                else -> GestureIntent.CURSOR_MOVE
+            }
+        }
+
+        when (intent) {
+            // ── 1-finger move → cursor ───────────────────────────────────────
+            GestureIntent.CURSOR_MOVE -> {
+                changes.fastForEach { if (it.pressed) it.consume() }
+                if (hasMeaningfulMove) {
+                    send(buildMessage(token, getSeq(), dx, dy,
+                        TrackpadMessage.ActionType.NO_ACTION,
+                        TrackpadMessage.PhaseType.UPDATE))
+                }
+            }
+
+            // ── 2-finger move → scroll ───────────────────────────────────────
+            GestureIntent.SCROLL -> {
+                changes.fastForEach { if (it.pressed) it.consume() }
+                if (hasMeaningfulMove) {
+                    // Determine axis dominance per-event so diagonal drags feel natural.
+                    val action = if (abs(dy) >= abs(dx))
+                        TrackpadMessage.ActionType.VERTICAL_SCROLL
+                    else
+                        TrackpadMessage.ActionType.HORIZONTAL_SCROLL
+                    send(buildMessage(token, getSeq(), dx, dy,
+                        action, TrackpadMessage.PhaseType.UPDATE))
+                }
+            }
+
+            // ── 3-finger move → directional swipe (fire-once) ────────────────
+            GestureIntent.THREE_SWIPE -> {
+                changes.fastForEach { if (it.pressed) it.consume() }
+                swipeAccumX += dx
+                swipeAccumY += dy
+
+                if (!swipeDispatched &&
+                    (abs(swipeAccumX) > THREE_FINGER_SWIPE_THRESHOLD ||
+                            abs(swipeAccumY) > THREE_FINGER_SWIPE_THRESHOLD)
+                ) {
+                    swipeDispatched = true
+                    val action = when {
+                        abs(swipeAccumX) > abs(swipeAccumY) ->
+                            if (swipeAccumX > 0) TrackpadMessage.ActionType.SWIPE_RIGHT
+                            else TrackpadMessage.ActionType.SWIPE_LEFT
+                        else ->
+                            if (swipeAccumY > 0) TrackpadMessage.ActionType.SWIPE_DOWN
+                            else TrackpadMessage.ActionType.SWIPE_UP
+                    }
+                    send(buildMessage(token, getSeq(), 0f, 0f,
+                        action, TrackpadMessage.PhaseType.START))
+                }
+            }
+
+            GestureIntent.UNDECIDED -> Unit
+        }
+    }
+
+    // ── Phase 3: tap resolution ───────────────────────────────────────────────
+    when {
+        // ── 2-finger tap → Right Click ────────────────────────────────────────
+        intent == GestureIntent.UNDECIDED && maxPointers == 2 -> {
+            sendClick(token, getSeq, send, TrackpadMessage.ActionType.RIGHT_CLICK)
+        }
+
+        // ── 1-finger tap → Left Click + optional Double-Tap-Drag ─────────────
+        intent == GestureIntent.UNDECIDED && maxPointers == 1 -> {
+            // ① Immediate click — zero latency for normal taps.
+            sendClick(token, getSeq, send, TrackpadMessage.ActionType.LEFT_CLICK)
+
+            // ② Watch for a follow-up press that would start a drag.
+            val dragDown = withTimeoutOrNull(doubleTapTimeoutMs) {
+                awaitFirstDown(requireUnconsumed = false)
+            } ?: return // Timeout: this was just a normal click, we're done.
+
+            // ③ Second finger-down within the window → Double-tap drag begins.
+            send(buildMessage(token, getSeq(), 0f, 0f,
+                TrackpadMessage.ActionType.DOUBLE_CLICK,
+                TrackpadMessage.PhaseType.START))
+
+            while (true) {
+                val dragEvent = awaitPointerEvent()
+                val dragChanges = dragEvent.changes
+
+                var dragActive = 0
+                dragChanges.fastForEach { if (it.pressed) dragActive++ }
+                if (dragActive == 0) break
+
+                val dragPan = dragEvent.calculatePan()
+                dragChanges.fastForEach { if (it.pressed) it.consume() }
+
+                if (abs(dragPan.x) > 0f || abs(dragPan.y) > 0f) {
+                    send(buildMessage(token, getSeq(), dragPan.x, dragPan.y,
+                        TrackpadMessage.ActionType.NO_ACTION,
+                        TrackpadMessage.PhaseType.UPDATE))
+                }
+            }
+
+            // ④ Finger lifted: release the held button.
+            send(buildMessage(token, getSeq(), 0f, 0f,
+                TrackpadMessage.ActionType.DOUBLE_CLICK,
+                TrackpadMessage.PhaseType.END))
+        }
+    }
 }
 
-// Builds a trackpad message
-private fun createMessage(
+/** Sends a discrete click as a START immediately followed by an END. */
+private fun sendClick(
     token: Int,
-    dx: Float = 0f,
-    dy: Float = 0f,
-    action: TrackpadMessage.ActionType = TrackpadMessage.ActionType.NO_ACTION,
-    phase: TrackpadMessage.PhaseType = TrackpadMessage.PhaseType.START
+    getSeq: () -> Int,
+    send: (TrackpadMessage) -> Unit,
+    action: TrackpadMessage.ActionType,
+) {
+    send(buildMessage(token, getSeq(), 0f, 0f, action, TrackpadMessage.PhaseType.START))
+    send(buildMessage(token, getSeq(), 0f, 0f, action, TrackpadMessage.PhaseType.END))
+}
+
+/** Constructs a [TrackpadMessage] from its constituent fields. */
+private fun buildMessage(
+    token: Int,
+    seq: Int,
+    dx: Float,
+    dy: Float,
+    action: TrackpadMessage.ActionType,
+    phase: TrackpadMessage.PhaseType,
 ): TrackpadMessage = trackpadMessage {
-    this.authToken = token
-    this.deltaX = dx
-    this.deltaY = dy
+    authToken = token
+    sequenceNumber = seq
+    deltaX = dx
+    deltaY = dy
     this.action = action
     this.phase = phase
-    this.timestamp = System.currentTimeMillis()
-    this.deviceName = android.os.Build.MODEL
+    timestamp = System.currentTimeMillis()
 }

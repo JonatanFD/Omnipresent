@@ -9,6 +9,7 @@ pub struct LinuxMouseStrategy {
     device: VirtualDevice,
     scroll_accumulator_y: f32,
     scroll_accumulator_x: f32,
+    last_sequence: u32, // NEW: Tracks packet order
 }
 
 impl LinuxMouseStrategy {
@@ -44,7 +45,25 @@ impl LinuxMouseStrategy {
             device,
             scroll_accumulator_y: 0.0,
             scroll_accumulator_x: 0.0,
+            last_sequence: 0,
         }
+    }
+
+    /// NEW: UDP Anti-Jitter Filter
+    /// Call this before processing movement or actions.
+    /// Returns `true` if the packet is fresh, `false` if it arrived late and should be dropped.
+    pub fn accept_sequence(&mut self, seq: u32) -> bool {
+        // Using wrapping subtraction handles the case where the u32 counter rolls over to 0.
+        let diff = self.last_sequence.wrapping_sub(seq);
+
+        // If the sequence is older than the last one (but by less than 1000 to account for wrap-around)
+        // it means the UDP packet arrived out of order. Drop it.
+        if diff > 0 && diff < 1000 {
+            return false;
+        }
+
+        self.last_sequence = seq;
+        true
     }
 
     // Handles click behavior depending on gesture phase
@@ -115,7 +134,8 @@ impl MouseStrategy for LinuxMouseStrategy {
                         KeyCode::BTN_LEFT.0,
                         1,
                     )]);
-                    thread::sleep(Duration::from_millis(30));
+                    // IMPORTANT: 60ms delay ensures Linux debouncer registers the click
+                    thread::sleep(Duration::from_millis(60));
 
                     // First click: release
                     let _ = self.device.emit(&[InputEvent::new(
@@ -123,9 +143,9 @@ impl MouseStrategy for LinuxMouseStrategy {
                         KeyCode::BTN_LEFT.0,
                         0,
                     )]);
-                    thread::sleep(Duration::from_millis(30));
+                    thread::sleep(Duration::from_millis(60));
 
-                    // Second click: press and hold
+                    // Second click: press and HOLD (Starts Drag)
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
@@ -133,10 +153,7 @@ impl MouseStrategy for LinuxMouseStrategy {
                     )]);
                 }
                 PhaseType::End => {
-                    // Add a small delay to ensure Linux registers the second click properly
-                    thread::sleep(Duration::from_millis(20));
-
-                    // Second click: release
+                    // Second click: release (Ends Drag)
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::KEY.0,
                         KeyCode::BTN_LEFT.0,
@@ -153,45 +170,35 @@ impl MouseStrategy for LinuxMouseStrategy {
             },
 
             ActionType::VerticalScroll => {
-                // Accumulate finger movement for smooth scrolling
                 self.scroll_accumulator_y += dy;
-
-                // Emit scroll event only when threshold is reached
                 if self.scroll_accumulator_y.abs() >= SCROLL_THRESHOLD {
                     let scroll_direction = if self.scroll_accumulator_y > 0.0 {
                         1
                     } else {
                         -1
                     };
-
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::RELATIVE.0,
                         RelativeAxisCode::REL_WHEEL.0,
                         scroll_direction,
                     )]);
-
-                    // Preserve remainder for smoother continuous scrolling
                     self.scroll_accumulator_y %= SCROLL_THRESHOLD;
                 }
             }
 
             ActionType::HorizontalScroll => {
-                // Accumulate horizontal movement
                 self.scroll_accumulator_x += dx;
-
                 if self.scroll_accumulator_x.abs() >= SCROLL_THRESHOLD {
                     let scroll_direction = if self.scroll_accumulator_x > 0.0 {
                         -1
                     } else {
                         1
                     };
-
                     let _ = self.device.emit(&[InputEvent::new(
                         EventType::RELATIVE.0,
                         RelativeAxisCode::REL_HWHEEL.0,
                         scroll_direction,
                     )]);
-
                     self.scroll_accumulator_x %= SCROLL_THRESHOLD;
                 }
             }
@@ -253,7 +260,6 @@ impl MouseStrategy for LinuxMouseStrategy {
             }
 
             ActionType::NoAction => {
-                // Reset accumulators when no gesture is active
                 self.scroll_accumulator_y = 0.0;
                 self.scroll_accumulator_x = 0.0;
             }

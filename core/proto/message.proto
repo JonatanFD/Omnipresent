@@ -34,4 +34,6 @@ message TrackpadMessage {
   uint64 timestamp = 6;
 
   uint32 auth_token = 7;
+
+  uint32 sequence_number = 8;
 }

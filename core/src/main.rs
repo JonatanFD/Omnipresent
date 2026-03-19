@@ -39,17 +39,11 @@ async fn main() -> io::Result<()> {
         // 2. Inject the strategy into the controller
         let mut controller = InputController::new(strategy);
 
-        let mut last_timestamp = 0;
-
         info!("Omnipresent Server Started");
 
         while let Some(msg) = rx.blocking_recv() {
-            if msg.timestamp < last_timestamp {
-                continue;
-            }
             let action = msg.action();
             let phase = msg.phase();
-            last_timestamp = msg.timestamp;
 
             info!(
                 "Received event - dx: {:.2}, dy: {:.2}, action: {:?}, phase: {:?}",
@@ -59,11 +53,12 @@ async fn main() -> io::Result<()> {
                 msg.phase()
             );
 
+            // Separamos la ejecución: Movimiento puro vs Acciones (Clics, Scrolls, Swipes)
             if (msg.delta_x != 0.0 || msg.delta_y != 0.0) && action == ActionType::NoAction {
                 controller.move_mouse(msg.delta_x, msg.delta_y);
             }
 
-            if action != crate::network::ActionType::NoAction {
+            if action != ActionType::NoAction {
                 controller.execute_action(action, phase, msg.delta_x, msg.delta_y);
             }
         }
