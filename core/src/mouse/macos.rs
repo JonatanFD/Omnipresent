@@ -93,7 +93,7 @@ impl MouseStrategy for MacOsMouseStrategy {
                     let scroll_x = (self.scroll_accumulator_x / threshold).trunc() as i32;
                     self.scroll_accumulator_x %= threshold;
 
-                    let _ = self.enigo.scroll(scroll_x, Axis::Horizontal);
+                    let _ = self.enigo.scroll(-scroll_x, Axis::Horizontal);
                 }
             }
 
