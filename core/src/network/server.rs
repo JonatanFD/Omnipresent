@@ -59,8 +59,16 @@ impl OmnipresentServer {
                         Ok(msg) => {
                             // Verificación de Seguridad con el token fijo
                             if msg.auth_token != self.token {
-                                warn!("Token inválido desde {}. Bloqueando.", peer.ip());
+                                warn!("Token inválido desde {}. Rechazando.", peer.ip());
+
+                                let _ = self.socket.send_to(b"AUTH_FAIL", peer).await;
                                 continue;
+                            }
+
+                            if self.is_first_packet {
+                                info!("Nuevo cliente autenticado desde {}", peer);
+                                let _ = self.socket.send_to(b"AUTH_OK", peer).await;
+                                self.is_first_packet = false;
                             }
 
                             let current_seq = msg.sequence_number;
