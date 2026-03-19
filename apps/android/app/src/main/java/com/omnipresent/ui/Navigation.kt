@@ -9,6 +9,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.omnipresent.network.DiscoveredServer
 
 @Composable
 fun AppNavigation(
@@ -20,6 +21,27 @@ fun AppNavigation(
     val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
 
     NavHost(navController = navController, startDestination = "home") {
+        composable("discovery") {
+            DiscoveryScreen(
+                onServerFound = { server ->
+                    prefs.edit()
+                        .putString("saved_ip", server.ip)
+                        .putInt("saved_port", server.port)
+                        .putInt("saved_token", server.token)
+                        .apply()
+
+                    navController.navigate("trackpad/${server.ip}/${server.port}/${server.token}") {
+                        popUpTo("discovery") { inclusive = true }
+                    }
+                },
+                onDiscoveryFailed = {
+                    navController.navigate("home") {
+                        popUpTo("discovery") { inclusive = true }
+                    }
+                }
+            )
+        }
+
         composable("home") {
             val savedIp = prefs.getString("saved_ip", null)
             val savedPort = prefs.getInt("saved_port", -1)
@@ -28,6 +50,9 @@ fun AppNavigation(
             HomeScreen(
                 isDarkTheme = isDarkTheme,
                 onThemeToggle = onThemeToggle,
+                onFindServerClick = {
+                    navController.navigate("discovery")
+                },
                 onScanClick = {
                     navController.navigate("scanner")
                 },

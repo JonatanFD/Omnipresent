@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.dp
 fun HomeScreen(
     isDarkTheme: Boolean,
     onThemeToggle: () -> Unit,
+    onFindServerClick: () -> Unit,
     onScanClick: () -> Unit,
     canReconnect: Boolean,
     onReconnectClick: () -> Unit
@@ -64,6 +66,25 @@ fun HomeScreen(
             )
 
             Spacer(modifier = Modifier.height(48.dp))
+
+            // Find Server Button
+            Button(
+                onClick = onFindServerClick,
+                modifier = Modifier
+                    .padding(vertical = 8.dp)
+                    .height(56.dp)
+                    .fillMaxWidth(0.7f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Find Server Icon"
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Find Server",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
 
             // Scan QR Button
             Button(

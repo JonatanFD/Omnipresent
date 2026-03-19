@@ -15,7 +15,7 @@ use std::io;
 use tokio::sync::mpsc;
 
 // Libraries for QR Popup
-use image::{Luma, Rgb};
+use image::Rgb;
 use local_ip_address::local_ip;
 use qrcode::QrCode;
 
@@ -29,9 +29,10 @@ async fn main() -> io::Result<()> {
 
     info!("Starting Omnipresent Server...");
 
-    // Check if terminal requested PIN reset
+    // Check if terminal requested PIN reset or QR display
     let args: Vec<String> = env::args().collect();
     let force_reset = args.contains(&String::from("--reset-pin"));
+    let show_qr = args.contains(&String::from("--qr")) || args.contains(&String::from("-qr"));
 
     // Communication channel between UDP server and mouse controller
     let (tx, mut rx) = mpsc::channel::<TrackpadMessage>(100);
@@ -43,12 +44,25 @@ async fn main() -> io::Result<()> {
     let secure_pin = AuthInfo::get_or_create_token(force_reset);
     server.set_token(secure_pin);
 
-    // 3. Get IP and show QR as a popup window
+    // 3. Start discovery service in a separate task
+    let discovery_port = SERVER_PORT;
+    let discovery_token = secure_pin;
+    tokio::spawn(async move {
+        if let Err(e) = OmnipresentServer::start_discovery_service(discovery_port, discovery_token).await {
+            error!("Error in discovery service: {}", e);
+        }
+    });
+
+    // 4. Get IP and optionally show QR as a popup window
     match local_ip() {
         Ok(my_local_ip) => {
             info!("Local IP detected: {}", my_local_ip);
-            // Call function that creates and opens PNG image
-            show_qr_popup(&my_local_ip.to_string(), SERVER_PORT, secure_pin);
+            if show_qr {
+                // Call function that creates and opens PNG image
+                show_qr_popup(&my_local_ip.to_string(), SERVER_PORT, secure_pin);
+            } else {
+                info!("Run with --qr to display the pairing QR code");
+            }
         }
         Err(e) => {
             error!("Could not get local IP for QR: {}", e);
@@ -56,7 +70,7 @@ async fn main() -> io::Result<()> {
         }
     }
 
-    // 4. Start mouse controller thread
+    // 5. Start mouse controller thread
     std::thread::spawn(move || {
         let strategy = MouseStrategyFactory::create();
         let mut controller = InputController::new(strategy);
@@ -79,7 +93,8 @@ async fn main() -> io::Result<()> {
         }
     });
 
-    // 5. Keep UDP server listening asynchronously
+    // 6. Keep UDP server listening asynchronously
+    info!("Server ready. Listening on port {}, PIN: {}", SERVER_PORT, secure_pin);
     server.run().await
 }
 

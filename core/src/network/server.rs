@@ -15,6 +15,30 @@ pub struct OmnipresentServer {
 }
 
 impl OmnipresentServer {
+    pub async fn start_discovery_service(port: u16, token: u32) -> io::Result<()> {
+        let discovery_port = port + 1;
+        let address = format!("0.0.0.0:{}", discovery_port);
+        let socket = UdpSocket::bind(&address).await?;
+        let mut buf = [0u8; 1024];
+
+        info!("Service discovery active on port {}", discovery_port);
+
+        loop {
+            match socket.recv_from(&mut buf).await {
+                Ok((len, peer)) => {
+                    let message = String::from_utf8_lossy(&buf[..len]);
+                    if message == "OMNIPRESENT_DISCOVERY" {
+                        let response = format!("OMNIPRESENT_HERE|{}|{}", port, token);
+                        let _ = socket.send_to(response.as_bytes(), peer).await;
+                    }
+                }
+                Err(e) => {
+                    error!("Discovery service error: {}", e);
+                }
+            }
+        }
+    }
+
     // 1. Modify bind to receive the desired port
     pub async fn bind(tx: mpsc::Sender<TrackpadMessage>, port: u16) -> io::Result<Self> {
         let address = format!("0.0.0.0:{}", port);
