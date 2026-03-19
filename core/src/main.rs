@@ -88,8 +88,8 @@ async fn main() -> io::Result<()> {
 
 /// Función que genera un archivo PNG con el QR y lo abre usando `opener`
 fn show_qr_popup(ip: &str, port: u16, pin: u32) {
-    // 1. Preparamos los datos con el formato IP:PUERTO:PIN
-    let qr_data = format!("{}:{}:{}", ip, port, pin);
+    // 1. Preparamos los datos con el formato omnipresent://IP:PUERTO/?token=PIN
+    let qr_data = format!("omnipresent://{}:{}/?token={}", ip, port, pin);
 
     // 2. Generamos la matriz del código QR
     let code = match QrCode::new(qr_data.as_bytes()) {
