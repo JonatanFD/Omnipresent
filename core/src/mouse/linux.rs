@@ -2,6 +2,8 @@ use crate::mouse::strategy::MouseStrategy;
 use crate::network::{ActionType, PhaseType};
 use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
 use evdev::{AttributeSet, EventType, InputEvent, KeyCode, RelativeAxisCode};
+use std::thread;
+use std::time::Duration;
 
 const SCROLL_THRESHOLD: f32 = 15.0;
 
@@ -9,7 +11,7 @@ pub struct LinuxMouseStrategy {
     device: VirtualDevice,
     scroll_accumulator_y: f32,
     scroll_accumulator_x: f32,
-    last_sequence: u32, // NEW: Tracks packet order
+    last_sequence: u32,
 }
 
 impl LinuxMouseStrategy {
@@ -49,24 +51,7 @@ impl LinuxMouseStrategy {
         }
     }
 
-    /// NEW: UDP Anti-Jitter Filter
-    /// Call this before processing movement or actions.
-    /// Returns `true` if the packet is fresh, `false` if it arrived late and should be dropped.
-    pub fn accept_sequence(&mut self, seq: u32) -> bool {
-        // Using wrapping subtraction handles the case where the u32 counter rolls over to 0.
-        let diff = self.last_sequence.wrapping_sub(seq);
-
-        // If the sequence is older than the last one (but by less than 1000 to account for wrap-around)
-        // it means the UDP packet arrived out of order. Drop it.
-        if diff > 0 && diff < 1000 {
-            return false;
-        }
-
-        self.last_sequence = seq;
-        true
-    }
-
-    // Handles click behavior depending on gesture phase
+    // Maneja los clics dependiendo de la fase
     fn handle_click_phase(&mut self, button: KeyCode, phase: PhaseType) {
         match phase {
             PhaseType::Start => {
@@ -118,56 +103,10 @@ impl MouseStrategy for LinuxMouseStrategy {
     }
 
     fn execute_action(&mut self, action: ActionType, phase: PhaseType, dx: f32, dy: f32) {
-        use std::thread;
-        use std::time::Duration;
-
         match action {
             ActionType::RightClick => self.handle_click_phase(KeyCode::BTN_RIGHT, phase),
 
             ActionType::LeftClick => self.handle_click_phase(KeyCode::BTN_LEFT, phase),
-
-            ActionType::DoubleClick => match phase {
-                PhaseType::Start => {
-                    // First click: press
-                    let _ = self.device.emit(&[InputEvent::new(
-                        EventType::KEY.0,
-                        KeyCode::BTN_LEFT.0,
-                        1,
-                    )]);
-                    // IMPORTANT: 60ms delay ensures Linux debouncer registers the click
-                    thread::sleep(Duration::from_millis(60));
-
-                    // First click: release
-                    let _ = self.device.emit(&[InputEvent::new(
-                        EventType::KEY.0,
-                        KeyCode::BTN_LEFT.0,
-                        0,
-                    )]);
-                    thread::sleep(Duration::from_millis(60));
-
-                    // Second click: press and HOLD (Starts Drag)
-                    let _ = self.device.emit(&[InputEvent::new(
-                        EventType::KEY.0,
-                        KeyCode::BTN_LEFT.0,
-                        1,
-                    )]);
-                }
-                PhaseType::End => {
-                    // Second click: release (Ends Drag)
-                    let _ = self.device.emit(&[InputEvent::new(
-                        EventType::KEY.0,
-                        KeyCode::BTN_LEFT.0,
-                        0,
-                    )]);
-                }
-                _ => {
-                    let _ = self.device.emit(&[InputEvent::new(
-                        EventType::KEY.0,
-                        KeyCode::BTN_LEFT.0,
-                        0,
-                    )]);
-                }
-            },
 
             ActionType::VerticalScroll => {
                 self.scroll_accumulator_y += dy;
