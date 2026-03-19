@@ -70,6 +70,7 @@ fun ScannerScreen(onQrScanned: (String) -> Unit) {
                         val analysisExecutor = Executors.newSingleThreadExecutor()
 
                         imageAnalysis.setAnalyzer(analysisExecutor) { imageProxy ->
+                            @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
                             val mediaImage = imageProxy.image
                             if (mediaImage != null) {
                                 val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)

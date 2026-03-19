@@ -5,13 +5,14 @@ import android.content.pm.ActivityInfo
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.View
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.*
@@ -31,6 +32,8 @@ import com.omnipresent.network.UdpClient
 import com.omnipresent.protocol.TrackpadMessage
 import com.omnipresent.protocol.trackpadMessage
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
@@ -67,11 +70,33 @@ fun TrackpadScreen(
 
     val messageChannel = remember { Channel<TrackpadMessage>(Channel.UNLIMITED) }
     val seqCounter = remember { intArrayOf(0) }
+    var connectionStatus by remember { mutableStateOf<String?>(null) }
 
     // Sends messages asynchronously to avoid blocking UI thread
     LaunchedEffect(messageChannel) {
         for (msg in messageChannel) {
             udpClient.send(msg)
+        }
+    }
+
+    LaunchedEffect(udpClient) {
+        while (isActive) {
+            val response = udpClient.receive()
+            if (response != null) {
+                if (response.startsWith("AUTH_OK")) {
+                    connectionStatus = "Connected successfully"
+                } else if (response.startsWith("AUTH_FAIL")) {
+                    connectionStatus = "Authentication failed (Invalid PIN)"
+                }
+            }
+            delay(10)
+        }
+    }
+
+    LaunchedEffect(connectionStatus) {
+        connectionStatus?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            connectionStatus = null
         }
     }
 
@@ -142,7 +167,7 @@ fun TrackpadScreen(
                 DropdownMenuItem(
                     text = { Text("Exit") },
                     onClick = { showMenu = false; onExit() },
-                    leadingIcon = { Icon(Icons.Default.ExitToApp, contentDescription = null) },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null) },
                 )
             }
         }

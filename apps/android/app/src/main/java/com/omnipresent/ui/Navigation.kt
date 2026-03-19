@@ -1,7 +1,9 @@
 package com.omnipresent.ui
 
+import android.content.Context
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -9,14 +11,33 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 
 @Composable
-fun AppNavigation() {
+fun AppNavigation(
+    isDarkTheme: Boolean,
+    onThemeToggle: () -> Unit
+) {
     val navController = rememberNavController()
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
 
     NavHost(navController = navController, startDestination = "home") {
         composable("home") {
-            HomeScreen(onScanClick = {
-                navController.navigate("scanner")
-            })
+            val savedIp = prefs.getString("saved_ip", null)
+            val savedPort = prefs.getInt("saved_port", -1)
+            val savedToken = prefs.getInt("saved_token", -1)
+
+            HomeScreen(
+                isDarkTheme = isDarkTheme,
+                onThemeToggle = onThemeToggle,
+                onScanClick = {
+                    navController.navigate("scanner")
+                },
+                canReconnect = savedIp != null && savedPort != -1 && savedToken != -1,
+                onReconnectClick = {
+                    if (savedIp != null && savedPort != -1 && savedToken != -1) {
+                        navController.navigate("trackpad/$savedIp/$savedPort/$savedToken")
+                    }
+                }
+            )
         }
 
         composable("scanner") {
@@ -27,6 +48,12 @@ fun AppNavigation() {
                 val token = uri.getQueryParameter("token")?.toIntOrNull() ?: 0
 
                 if (ip.isNotEmpty() && port != -1) {
+                    prefs.edit()
+                        .putString("saved_ip", ip)
+                        .putInt("saved_port", port)
+                        .putInt("saved_token", token)
+                        .apply()
+
                     navController.navigate("trackpad/$ip/$port/$token") {
                         popUpTo("home")
                     }
