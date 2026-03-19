@@ -1,34 +1,41 @@
-use std::env::consts::OS;
-
+use crate::mouse::strategy::MouseStrategy;
 use log::info;
 
-use crate::mouse::{
-    linux::LinuxMouseStrategy, macos::MacOsMouseStrategy, strategy::MouseStrategy,
-    windows::WindowsMouseStrategy,
-};
+#[cfg(target_os = "linux")]
+use crate::mouse::linux::LinuxMouseStrategy;
+
+#[cfg(target_os = "windows")]
+use crate::mouse::windows::WindowsMouseStrategy;
+
+#[cfg(target_os = "macos")]
+use crate::mouse::macos::MacOsMouseStrategy;
 
 pub struct MouseStrategyFactory;
 
 impl MouseStrategyFactory {
-    // We return a Trait Object (Box<dyn Trait>)
     pub fn create() -> Box<dyn MouseStrategy> {
-        match OS {
-            "linux" => {
-                info!("Detected OS: Linux. Instantiating LinuxMouseStrategy.");
-                Box::new(LinuxMouseStrategy::new())
-            }
-            "windows" => {
-                info!("Detected OS: Windows. Instantiating WindowsMouseStrategy.");
-                Box::new(WindowsMouseStrategy::new())
-            }
-            "macos" => {
-                info!("Detected OS: macOS. Instantiating MacOsMouseStrategy.");
-                Box::new(MacOsMouseStrategy::new())
-            }
-            _ => {
-                info!("OS not natively supported. Using Linux as fallback.");
-                Box::new(LinuxMouseStrategy::new())
-            }
+        #[cfg(target_os = "linux")]
+        {
+            info!("Compilado para Linux. Instanciando LinuxMouseStrategy.");
+            Box::new(LinuxMouseStrategy::new())
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            info!("Compilado para Windows. Instanciando WindowsMouseStrategy.");
+            Box::new(WindowsMouseStrategy::new())
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            info!("Compilado para macOS. Instanciando MacOsMouseStrategy.");
+            Box::new(MacOsMouseStrategy::new())
+        }
+
+        // Fallback si intentas compilar en algo raro como FreeBSD o Android
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+        {
+            panic!("Sistema operativo no soportado nativamente.");
         }
     }
 }
