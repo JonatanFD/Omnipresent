@@ -11,13 +11,12 @@ message TrackpadMessage {
     NO_ACTION = 0;
     RIGHT_CLICK = 1;
     LEFT_CLICK = 2;
-    DOUBLE_CLICK = 3;
-    HORIZONTAL_SCROLL = 4;
-    VERTICAL_SCROLL = 5;
-    SWIPE_LEFT = 6;
-    SWIPE_RIGHT = 7;
-    SWIPE_UP = 8;
-    SWIPE_DOWN = 9;
+    HORIZONTAL_SCROLL = 3;
+    VERTICAL_SCROLL = 4;
+    SWIPE_LEFT = 5;
+    SWIPE_RIGHT = 6;
+    SWIPE_UP = 7;
+    SWIPE_DOWN = 8;
   }
 
   ActionType action = 4;
