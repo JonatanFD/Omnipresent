@@ -2,9 +2,8 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useCarousel } from "../ui/carousel";
 import { Button } from "../ui/button";
 import { Windows } from "../ui/svgs/windows";
-import { Apple } from "../ui/svgs/apple";
 import { Linux } from "../ui/svgs/linux";
-import { AppleDark } from "../ui/svgs/appleDark";
+import MacOS from "../ui/svgs/macos";
 
 export function WelcomeSlide3() {
   const { scrollNext, scrollPrev } = useCarousel();
@@ -16,8 +15,9 @@ export function WelcomeSlide3() {
             <Windows className="size-20" />
           </li>
           <li>
-            <Apple className="size-20 dark:hidden" />
-            <AppleDark className="size-20 hidden dark:block" />
+            {/*<Apple className="size-20 dark:hidden" />
+            <AppleDark className="size-20 hidden dark:block" />*/}
+            <MacOS className="size-20" />
           </li>
           <li>
             <Linux className="size-20" />
@@ -33,7 +33,7 @@ export function WelcomeSlide3() {
         </div>
 
         <section className="flex-1 px-4 h-full items-center">
-          <p>Omnipresent works on all platforms.</p>
+          <p>Omnipresent works fine on all platforms.</p>
         </section>
 
         <div className="flex items-center">
