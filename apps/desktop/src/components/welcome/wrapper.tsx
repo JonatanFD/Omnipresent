@@ -1,20 +1,33 @@
-import { Card, CardContent } from "../ui/card";
 import { Carousel, CarouselContent, CarouselItem } from "../ui/carousel";
 import { WelcomeBar } from "./bar";
+import { WelcomeSlide1 } from "./slide-1";
+import { WelcomeSlide2 } from "./slide-2";
+import { WelcomeSlide3 } from "./slide-3";
+
+const welcomeWrapperItems = [
+  {
+    title: "Intro",
+    content: <WelcomeSlide1 />,
+  },
+  {
+    title: "Control your PC",
+    content: <WelcomeSlide2 />,
+  },
+  {
+    title: "Multiplatform",
+    content: <WelcomeSlide3 />,
+  },
+];
 
 export function WelcomeView() {
   return (
     <section className="w-full relative">
       <WelcomeBar />
-      <Carousel className="">
-        <CarouselContent className="">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <CarouselItem key={index} className="">
-              <Card className="h-[500px] rounded-none before:hidden border-none">
-                <CardContent className="flex items-center justify-center p-6">
-                  <span className="text-4xl font-semibold">{index + 1}</span>
-                </CardContent>
-              </Card>
+      <Carousel opts={{ watchDrag: false }}>
+        <CarouselContent>
+          {welcomeWrapperItems.map((item) => (
+            <CarouselItem key={item.title}>
+              <main>{item.content}</main>
             </CarouselItem>
           ))}
         </CarouselContent>

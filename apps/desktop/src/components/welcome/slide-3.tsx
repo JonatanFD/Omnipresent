@@ -1,12 +1,30 @@
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useCarousel } from "../ui/carousel";
 import { Button } from "../ui/button";
+import { Windows } from "../ui/svgs/windows";
+import { Apple } from "../ui/svgs/apple";
+import { Linux } from "../ui/svgs/linux";
+import { AppleDark } from "../ui/svgs/appleDark";
 
-export function WelcomeSlide2() {
+export function WelcomeSlide3() {
   const { scrollNext, scrollPrev } = useCarousel();
   return (
     <article className="min-h-screen flex flex-col">
-      <div className="bg-muted h-120 flex justify-center items-center flex-col gap-10"></div>
+      <div className="bg-muted h-120 flex justify-center items-center flex-col gap-10">
+        <ul className="flex items-center gap-20">
+          <li>
+            <Windows className="size-20" />
+          </li>
+          <li>
+            <Apple className="size-20 dark:hidden" />
+            <AppleDark className="size-20 hidden dark:block" />
+          </li>
+          <li>
+            <Linux className="size-20" />
+          </li>
+        </ul>
+        <h1 className="text-4xl font-bold">Multiplatform</h1>
+      </div>
       <div className="flex-1 space-x-4 flex p-4">
         <div className="flex items-center">
           <Button onClick={scrollPrev} size="icon-xl">

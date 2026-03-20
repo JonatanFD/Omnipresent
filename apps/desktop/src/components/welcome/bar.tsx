@@ -8,7 +8,7 @@ export function WelcomeBar() {
     <div className="titlebar fixed top-0 left-0 right-0 z-10 flex justify-between items-center px-2 py-1">
       {/* Zona draggable */}
       <div data-tauri-drag-region className="flex-1 select-none">
-        <h1 className="pointer-events-none">Welcome to Omnipresent</h1>
+        <h1 className="pointer-events-none">Omnipresent</h1>
       </div>
 
       {/* Controles */}
