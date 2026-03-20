@@ -1,9 +1,9 @@
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useCarousel } from "../ui/carousel";
 import { Button } from "../ui/button";
-import { Windows } from "../ui/svgs/windows";
 import { Linux } from "../ui/svgs/linux";
 import MacOS from "../ui/svgs/macos";
+import Windows from "../ui/svgs/windows";
 
 export function WelcomeSlide3() {
   const { scrollNext, scrollPrev } = useCarousel();
@@ -15,8 +15,6 @@ export function WelcomeSlide3() {
             <Windows className="size-20" />
           </li>
           <li>
-            {/*<Apple className="size-20 dark:hidden" />
-            <AppleDark className="size-20 hidden dark:block" />*/}
             <MacOS className="size-20" />
           </li>
           <li>
