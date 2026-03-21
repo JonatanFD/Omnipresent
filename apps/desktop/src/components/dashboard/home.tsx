@@ -23,6 +23,7 @@ import { QRCode } from "../kibo-ui/qr-code";
 import { GithubDark } from "../ui/svgs/githubDark";
 import { GithubLight } from "../ui/svgs/githubLight";
 import { Link } from "react-router-dom"; // Mantenido por si lo usas en otro lado
+import Kofi from "../ui/svgs/kofi";
 
 export function Home() {
   const [isRunning, setIsRunning] = useState(false);
@@ -190,7 +191,10 @@ export function Home() {
       {/* FOOTER: Botones Sociales (Ocupa ambas columnas, centrado) */}
       <div className="col-span-1 md:col-span-2 flex flex-wrap items-center justify-center gap-4 pt-4 border-t">
         <a href="https://ko-fi.com/U7U51VV3PC" target="_blank" rel="noreferrer">
-          <Button variant="outline">Buy me a coffee ☕</Button>
+          <Button variant="outline">
+            <Kofi className="size-4" />
+            Buy me a coffee
+          </Button>
         </a>
         <Button variant="outline">
           <GithubDark className="hidden dark:inline w-4 h-4 mr-2" />
