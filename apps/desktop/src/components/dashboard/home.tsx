@@ -191,16 +191,22 @@ export function Home() {
       {/* FOOTER: Botones Sociales (Ocupa ambas columnas, centrado) */}
       <div className="col-span-1 md:col-span-2 flex flex-wrap items-center justify-center gap-4 pt-4 border-t">
         <a href="https://ko-fi.com/U7U51VV3PC" target="_blank" rel="noreferrer">
-          <Button variant="outline">
+          <Button className="bg-[#72A5F2] border-none hover:bg-[#72A5F2]/90">
             <Kofi className="size-4" />
-            Buy me a coffee
+            Support me on Ko-fi
           </Button>
         </a>
-        <Button variant="outline">
-          <GithubDark className="hidden dark:inline w-4 h-4 mr-2" />
-          <GithubLight className="dark:hidden w-4 h-4 mr-2" />
-          Star on GitHub
-        </Button>
+        <a
+          href="https://github.com/JonatanFD/Omnipresent"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <Button variant="outline">
+            <GithubDark className="hidden dark:inline w-4 h-4 mr-2" />
+            <GithubLight className="dark:hidden w-4 h-4 mr-2" />
+            Star on GitHub
+          </Button>
+        </a>
       </div>
     </main>
   );
