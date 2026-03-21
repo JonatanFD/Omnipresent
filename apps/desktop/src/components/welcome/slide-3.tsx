@@ -1,12 +1,24 @@
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useCarousel } from "../ui/carousel";
 import { Button } from "../ui/button";
 import { Linux } from "../ui/svgs/linux";
 import MacOS from "../ui/svgs/macos";
 import Windows from "../ui/svgs/windows";
+import { useState } from "react";
+import { Label } from "../ui/label";
+import { Checkbox } from "../ui/checkbox";
+import { saveInLocalStorage } from "@/lib/utils";
+import { LocalStorageKeys } from "@/lib/types";
 
 export function WelcomeSlide3() {
-  const { scrollNext, scrollPrev } = useCarousel();
+  const { scrollPrev } = useCarousel();
+
+  const [isTermsAccepted, setIsTermsAccepted] = useState(false);
+
+  const handleStart = () => {
+    saveInLocalStorage(LocalStorageKeys.ACEPTED_TERMS, "true");
+  }
+
   return (
     <article className="min-h-screen flex flex-col">
       <div className="bg-muted h-120 flex justify-center items-center flex-col gap-10">
@@ -30,13 +42,21 @@ export function WelcomeSlide3() {
           </Button>
         </div>
 
-        <section className="flex-1 px-4 h-full items-center">
+        <section className="flex-1 px-4 h-full items-center flex flex-col justify-center gap-4">
           <p>Omnipresent works fine on all platforms.</p>
+
+          <Label>
+            <Checkbox
+              checked={isTermsAccepted}
+              onCheckedChange={setIsTermsAccepted}
+            />
+            Accept terms and conditions
+          </Label>
         </section>
 
         <div className="flex items-center">
-          <Button onClick={scrollNext} size="icon-xl">
-            <ArrowRight />
+          <Button onClick={handleStart} size="xl" disabled={!isTermsAccepted}>
+            Start
           </Button>
         </div>
       </div>
