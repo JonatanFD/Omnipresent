@@ -3,6 +3,10 @@ name = "core"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "omnipresent_core"
+path = "src/lib.rs"
+
 [dependencies]
 env_logger = "0.11.9"
 image = "0.25.10"
@@ -12,6 +16,7 @@ opener = "0.8.4"
 prost = "0.14.3"
 qrcode = "0.14.1"
 rand = "0.10.0"
+serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.50.0", features = ["full"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
