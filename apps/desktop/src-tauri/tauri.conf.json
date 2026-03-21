@@ -15,7 +15,7 @@
         "title": "desktop",
         "width": 1000,
         "height": 700,
-        "decorations": false
+        "decorations": true
       }
     ],
     "security": {

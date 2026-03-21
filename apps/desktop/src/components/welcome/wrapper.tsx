@@ -1,5 +1,4 @@
 import { Carousel, CarouselContent, CarouselItem } from "../ui/carousel";
-import { WelcomeBar } from "./bar";
 import { WelcomeSlide1 } from "./slide-1";
 import { WelcomeSlide2 } from "./slide-2";
 import { WelcomeSlide3 } from "./slide-3";
@@ -22,7 +21,6 @@ const welcomeWrapperItems = [
 export function WelcomeView() {
   return (
     <section className="w-full relative">
-      <WelcomeBar />
       <Carousel opts={{ watchDrag: false }}>
         <CarouselContent>
           {welcomeWrapperItems.map((item) => (

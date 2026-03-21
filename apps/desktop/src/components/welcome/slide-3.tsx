@@ -9,15 +9,18 @@ import { Label } from "../ui/label";
 import { Checkbox } from "../ui/checkbox";
 import { saveInLocalStorage } from "@/lib/utils";
 import { LocalStorageKeys } from "@/lib/types";
+import { useNavigate } from "react-router-dom";
 
 export function WelcomeSlide3() {
   const { scrollPrev } = useCarousel();
+  const navigate = useNavigate();
 
   const [isTermsAccepted, setIsTermsAccepted] = useState(false);
 
   const handleStart = () => {
     saveInLocalStorage(LocalStorageKeys.ACEPTED_TERMS, "true");
-  }
+    navigate("/");
+  };
 
   return (
     <article className="min-h-screen flex flex-col">

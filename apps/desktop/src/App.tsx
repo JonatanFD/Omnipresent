@@ -5,13 +5,12 @@ import { getFromLocalStorage } from "./lib/utils";
 import { Home } from "./components/dashboard/home";
 
 function App() {
-
   const hasAcceptedTerms = getFromLocalStorage("acceptedTerms") === "true";
 
   const defaultRoute = [hasAcceptedTerms ? "/" : "/welcome"];
 
   return (
-   <MemoryRouter initialEntries={defaultRoute}>
+    <MemoryRouter initialEntries={defaultRoute}>
       <Routes>
         <Route path="/welcome" element={<WelcomeView />} />
         <Route path="/" element={<Home />} />
