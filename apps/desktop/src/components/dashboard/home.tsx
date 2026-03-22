@@ -2,13 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import {
   Play,
@@ -18,7 +12,8 @@ import {
   EyeOff,
   Wifi,
   WifiOff,
-  Server,
+  Copy,
+  Check,
 } from "lucide-react";
 import { QRCode } from "../kibo-ui/qr-code";
 import { GithubDark } from "../ui/svgs/githubDark";
@@ -48,6 +43,7 @@ export function Home() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const hydrateStatus = useCallback(async () => {
     setIsLoading(true);
@@ -59,7 +55,6 @@ export function Home() {
       ]);
       setStatus(coreStatus);
       setWifiInfo(wifi);
-
       if (coreStatus.connection?.port) {
         setPort(String(coreStatus.connection.port));
       }
@@ -82,13 +77,11 @@ export function Home() {
         setStatus(next);
         return;
       }
-
       const parsedPort = Number.parseInt(port, 10);
       if (Number.isNaN(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
         setError("Port must be between 1 and 65535");
         return;
       }
-
       const next = await startCoreService(parsedPort, false);
       setStatus(next);
       const wifi = await getCurrentWifiInfo();
@@ -103,192 +96,259 @@ export function Home() {
       setError("Start the service before generating a new QR");
       return;
     }
-
     setError(null);
     try {
       const next = await startCoreService(status.connection.port, true);
       setStatus(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to refresh QR data");
+      setError(
+        err instanceof Error ? err.message : "Failed to refresh QR data",
+      );
     }
   }, [status.connection, status.running]);
 
   const connectionLabel = useMemo(() => {
-    if (!status.running || !status.connection) {
-      return "Service stopped";
-    }
-
+    if (!status.running || !status.connection) return null;
     const ip = status.connection.ip ?? "0.0.0.0";
     return `${ip}:${status.connection.port}`;
   }, [status.connection, status.running]);
 
+  const copyToken = useCallback(() => {
+    if (!status.connection?.token) return;
+    navigator.clipboard.writeText(status.connection.token.toString());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [status.connection?.token]);
+
   return (
-    <main className="p-6 max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
-      <Card className="col-span-1 flex flex-col">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Server className="w-5 h-5" />
-            Core Service
-          </CardTitle>
-          <CardDescription>
-            Orquesta el backend modular desde Tauri
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-6 flex-grow">
-          <div className="flex items-center justify-between p-4 bg-muted/40 rounded-lg border">
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium">Estado del servicio</p>
-              <p className="text-xs text-muted-foreground">{connectionLabel}</p>
-            </div>
-            <Button
-              onClick={toggleServer}
-              variant={status.running ? "destructive" : "default"}
-              size="sm"
-              disabled={isLoading}
+    <main className="min-h-screen bg-background">
+      {/* Header */}
+      <div className="border-b px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-2 h-2 rounded-full transition-colors ${
+              status.running ? "bg-green-500" : "bg-muted-foreground/40"
+            }`}
+          />
+          <span className="text-sm font-medium">Omnipresent</span>
+          {connectionLabel && (
+            <span className="text-xs text-muted-foreground font-mono">
+              {connectionLabel}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {wifiInfo.connected ? (
+            <Wifi className="w-3.5 h-3.5" />
+          ) : (
+            <WifiOff className="w-3.5 h-3.5" />
+          )}
+          <span>{wifiInfo.ssid ?? "No network"}</span>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="max-w-lg mx-auto px-6 py-10 space-y-8">
+        {/* Service control */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-foreground">
+              Core service
+            </h2>
+            <Badge
+              variant={status.running ? "default" : "secondary"}
+              className="text-xs"
             >
-              {status.running ? (
-                <>
-                  <Square className="w-4 h-4 mr-2" /> Stop
-                </>
+              {status.running ? "Running" : "Stopped"}
+            </Badge>
+          </div>
+
+          <div className="flex gap-2">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="port" className="text-xs text-muted-foreground">
+                Port
+              </Label>
+              <Input
+                id="port"
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+                disabled={status.running}
+                placeholder="9090"
+                className="font-mono text-sm h-9"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                onClick={toggleServer}
+                variant={status.running ? "destructive" : "default"}
+                size="sm"
+                disabled={isLoading}
+                className="h-9 px-4"
+              >
+                {status.running ? (
+                  <>
+                    <Square className="w-3.5 h-3.5 mr-1.5" />
+                    Stop
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5 mr-1.5" />
+                    Start
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-xs text-destructive bg-destructive/10 rounded px-3 py-2">
+              {error}
+            </p>
+          )}
+        </section>
+
+        <Separator />
+
+        {/* Token */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-foreground">Session token</h2>
+          <div className="flex items-center gap-2 p-3 rounded-md bg-muted/50 border">
+            <p className="flex-1 text-xs font-mono text-muted-foreground truncate">
+              {status.connection?.token ?? "—"}
+            </p>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0"
+              disabled={!status.connection?.token}
+              onClick={copyToken}
+            >
+              {copied ? (
+                <Check className="w-3.5 h-3.5 text-green-500" />
               ) : (
-                <>
-                  <Play className="w-4 h-4 mr-2" /> Start
-                </>
+                <Copy className="w-3.5 h-3.5" />
               )}
             </Button>
           </div>
+        </section>
 
-          <div className="space-y-3">
-            <Label htmlFor="port">Puerto del servicio</Label>
-            <Input
-              id="port"
-              value={port}
-              onChange={(event) => setPort(event.target.value)}
-              disabled={status.running}
-              placeholder="9090"
-            />
-            <p className="text-xs text-muted-foreground">
-              Deten el servicio para cambiar el puerto.
-            </p>
+        <Separator />
+
+        {/* QR code */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-foreground">
+              Quick connect
+            </h2>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1.5"
+                onClick={() => setShowQR((v) => !v)}
+              >
+                {showQR ? (
+                  <EyeOff className="w-3.5 h-3.5" />
+                ) : (
+                  <Eye className="w-3.5 h-3.5" />
+                )}
+                {showQR ? "Hide" : "Show"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1.5"
+                disabled={!status.running}
+                onClick={generateNewQR}
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Refresh
+              </Button>
+            </div>
           </div>
 
-          <div className="p-4 rounded-lg border bg-muted/40">
-            <p className="text-sm font-medium mb-1">Token actual</p>
-            <p className="text-xs text-muted-foreground">
-              {status.connection?.token ?? "Unavailable"}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="col-span-1 flex flex-col">
-        <CardHeader>
-          <CardTitle>Conexión rápida</CardTitle>
-          <CardDescription>
-            Escanea el QR para conectar un dispositivo móvil
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center justify-between flex-grow space-y-6">
-          <div className="w-48 h-48 bg-muted rounded-lg border-2 border-dashed flex items-center justify-center relative overflow-hidden">
+          <div className="flex justify-center py-4">
             {showQR && status.connection?.qr_payload ? (
-              <QRCode
-                className="size-48 rounded border bg-white p-4 shadow-xs"
-                data={status.connection.qr_payload}
-              />
+              <div className="rounded-xl border bg-white p-4 shadow-sm">
+                <QRCode
+                  className="size-44"
+                  data={status.connection.qr_payload}
+                />
+              </div>
             ) : (
-              <div className="text-muted-foreground flex flex-col items-center">
-                <EyeOff className="w-8 h-8 mb-2 opacity-50" />
-                <span className="text-sm">
-                  {status.running ? "QR hidden" : "Start service to render QR"}
+              <div className="size-52 rounded-xl border-2 border-dashed flex flex-col items-center justify-center text-muted-foreground gap-2">
+                <EyeOff className="w-6 h-6 opacity-30" />
+                <span className="text-xs">
+                  {status.running
+                    ? "QR code hidden"
+                    : "Start service to show QR"}
                 </span>
               </div>
             )}
           </div>
+        </section>
 
-          <div className="flex gap-3 w-full justify-center">
-            <Button
-              variant="outline"
-              onClick={() => setShowQR((value) => !value)}
-              className="w-full max-w-[140px]"
-            >
-              {showQR ? (
-                <EyeOff className="w-4 h-4 mr-2" />
+        <Separator />
+
+        {/* Network info & footer */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {wifiInfo.connected ? (
+                <Wifi className="w-4 h-4 text-muted-foreground" />
               ) : (
-                <Eye className="w-4 h-4 mr-2" />
+                <WifiOff className="w-4 h-4 text-muted-foreground" />
               )}
-              {showQR ? "Ocultar" : "Mostrar"}
-            </Button>
+              <span className="text-sm font-medium">
+                {wifiInfo.ssid ?? "No network"}
+              </span>
+              {wifiInfo.interface && (
+                <span className="text-xs text-muted-foreground font-mono">
+                  {wifiInfo.interface}
+                </span>
+              )}
+            </div>
             <Button
-              variant="secondary"
-              onClick={generateNewQR}
-              className="w-full max-w-[140px]"
-              disabled={!status.running}
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1.5"
+              onClick={hydrateStatus}
             >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Nuevo QR
+              <RefreshCw className="w-3.5 h-3.5" />
+              Refresh
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </section>
 
-      <Card className="col-span-1 md:col-span-2">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            {wifiInfo.connected ? (
-              <Wifi className="w-5 h-5" />
-            ) : (
-              <WifiOff className="w-5 h-5" />
-            )}
-            WiFi actual
-          </CardTitle>
-          <CardDescription>
-            Endpoint del backend con la red activa de la PC
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge variant={wifiInfo.connected ? "default" : "outline"}>
-              {wifiInfo.connected ? "Connected" : "Disconnected"}
-            </Badge>
-            <span className="text-sm text-muted-foreground">
-              SSID: {wifiInfo.ssid ?? "N/A"}
-            </span>
-            <span className="text-sm text-muted-foreground">
-              Interface: {wifiInfo.interface ?? "N/A"}
-            </span>
-          </div>
+        <Separator />
 
-          <div>
-            <Button variant="outline" size="sm" onClick={hydrateStatus}>
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Refresh network status
+        {/* Links */}
+        <footer className="flex items-center justify-center gap-3 pt-2">
+          <a
+            href="https://ko-fi.com/U7U51VV3PC"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Button
+              size="sm"
+              className="h-8 text-xs bg-[#72A5F2] hover:bg-[#72A5F2]/90 border-none gap-1.5"
+            >
+              <Kofi className="size-3.5" />
+              Ko-fi
             </Button>
-          </div>
-
-          {error ? (
-            <p className="text-sm text-destructive">{error}</p>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <div className="col-span-1 md:col-span-2 flex flex-wrap items-center justify-center gap-4 pt-4 border-t">
-        <a href="https://ko-fi.com/U7U51VV3PC" target="_blank" rel="noreferrer">
-          <Button className="bg-[#72A5F2] border-none hover:bg-[#72A5F2]/90">
-            <Kofi className="size-4" />
-            Support me on Ko-fi
-          </Button>
-        </a>
-        <a
-          href="https://github.com/JonatanFD/Omnipresent"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <Button variant="outline">
-            <GithubDark className="hidden dark:inline w-4 h-4 mr-2" />
-            <GithubLight className="dark:hidden w-4 h-4 mr-2" />
-            Star on GitHub
-          </Button>
-        </a>
+          </a>
+          <a
+            href="https://github.com/JonatanFD/Omnipresent"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5">
+              <GithubDark className="hidden dark:inline w-3.5 h-3.5" />
+              <GithubLight className="dark:hidden w-3.5 h-3.5" />
+              GitHub
+            </Button>
+          </a>
+        </footer>
       </div>
     </main>
   );

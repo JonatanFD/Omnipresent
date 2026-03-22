@@ -5,81 +5,85 @@ interface OmnipresentProps extends React.SVGProps<SVGSVGElement> {}
 export default function Omnipresent(props: OmnipresentProps) {
   return (
     <svg
-      id="logo-svg"
-      width="512"
-      height="512"
-      viewBox="0 0 512 512"
+      width="824"
+      height="824"
+      viewBox="0 0 824 824"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
       {...props}
     >
+      <g clip-path="url(#clip0_25_77)">
+        <path
+          d="M609.953 0H214.047C95.832 0 0 95.832 0 214.047V609.953C0 728.168 95.832 824 214.047 824H609.953C728.168 824 824 728.168 824 609.953V214.047C824 95.832 728.168 0 609.953 0Z"
+          fill="url(#paint0_linear_25_77)"
+        />
+        <path
+          d="M617.195 369.026C617.201 333.069 607.744 297.743 589.774 266.6C571.803 235.457 545.953 209.595 514.822 191.612C483.69 173.629 448.375 164.16 412.424 164.156C376.474 164.152 341.156 173.614 310.021 191.59C278.886 209.566 253.03 235.423 235.053 266.562C217.076 297.701 207.611 333.025 207.609 368.982C207.608 404.94 217.07 440.264 235.044 471.404C253.019 502.545 278.872 528.404 310.006 546.383"
+          stroke="url(#paint1_linear_25_77)"
+          strokeWidth="24"
+          strokeLinecap="round"
+        />
+        <path
+          d="M552.016 357.007C549.977 333.589 542.061 311.064 529.003 291.513C515.944 271.963 498.162 256.019 477.304 245.157C456.445 234.294 433.182 228.864 409.667 229.368C386.152 229.872 363.143 236.294 342.769 248.04C322.396 259.786 305.315 276.477 293.107 296.569C280.898 316.661 273.957 339.505 272.924 362.988C271.891 386.472 276.801 409.837 287.198 430.921C297.596 452.006 313.145 470.13 332.409 483.617"
+          stroke="url(#paint2_linear_25_77)"
+          strokeWidth="12"
+          strokeLinecap="round"
+        />
+        <path
+          d="M418.273 618.174C416.235 620.165 412.805 618.722 412.805 615.871V358.614C412.805 355.747 416.272 354.311 418.299 356.338L604.999 543.038C607.026 545.065 605.59 548.532 602.723 548.532H495.004C494.74 548.532 494.478 548.565 494.222 548.629L488.636 550.025C488.082 550.164 487.575 550.447 487.167 550.845L418.273 618.174Z"
+          fill="black"
+        />
+        <path
+          d="M566.658 632.48C567.338 634.12 566.562 636 564.922 636.683L509.491 659.78C507.856 660.461 505.979 659.694 505.289 658.064L427.713 474.853C427.012 473.198 427.802 471.29 429.468 470.615L486.535 447.48C488.173 446.816 490.041 447.597 490.717 449.231L566.658 632.48Z"
+          fill="black"
+        />
+        <path
+          d="M492.47 497.722L461.04 510.915L513.816 636.632L545.246 623.438L492.47 497.722Z"
+          fill="white"
+        />
+        <path
+          d="M429.847 391.745V582.617L480.972 533.195L487.79 531.49H569.592L429.847 391.745Z"
+          fill="white"
+        />
+      </g>
       <defs>
-        <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="100%" stopColor="#ffffff" />
+        <linearGradient
+          id="paint0_linear_25_77"
+          x1="412"
+          y1="0"
+          x2="412"
+          y2="1361.93"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="white" />
+          <stop offset="1" stopColor="#B4B4B4" />
         </linearGradient>
-
-        <linearGradient id="halo-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#FFB300" />
-          <stop offset="50%" stopColor="#FFD700" />
-          <stop offset="100%" stopColor="#FFB300" />
+        <linearGradient
+          id="paint1_linear_25_77"
+          x1="337.978"
+          y1="241.129"
+          x2="422.425"
+          y2="640.3"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop />
+          <stop offset="1" stopColor="#9D9D9D" />
         </linearGradient>
-
-        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="8" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-
-        <filter id="drop-shadow" x="-50%" y="-50%" width="200%" height="200%">
-          <feDropShadow
-            dx="0"
-            dy="15"
-            stdDeviation="10"
-            floodColor="#000000"
-            floodOpacity="0.3"
-          />
-        </filter>
+        <linearGradient
+          id="paint2_linear_25_77"
+          x1="416.98"
+          y1="241.977"
+          x2="416.98"
+          y2="497.709"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop />
+          <stop offset="1" stopColor="#666666" />
+        </linearGradient>
+        <clipPath id="clip0_25_77">
+          <rect width="824" height="824" fill="white" />
+        </clipPath>
       </defs>
-
-      <rect
-        id="app-bg"
-        width="512"
-        height="512"
-        rx="115"
-        fill="url(#bg-gradient)"
-      />
-
-      <ellipse
-        cx="256"
-        cy="115"
-        rx="120"
-        ry="35"
-        fill="none"
-        stroke="url(#halo-gradient)"
-        strokeWidth="12"
-        filter="url(#glow)"
-      />
-      <ellipse
-        cx="256"
-        cy="115"
-        rx="120"
-        ry="35"
-        fill="none"
-        stroke="#FFFFFF"
-        strokeWidth="3"
-        opacity="0.8"
-      />
-
-      <path
-        d="M 179 165 L 179 389 L 235 333 L 277 431 L 319 417 L 277 319 L 333 319 Z"
-        fill="#FFFFFF"
-        stroke="#1e293b"
-        strokeWidth="12"
-        strokeLinejoin="round"
-        filter="url(#drop-shadow)"
-      />
     </svg>
   );
 }
