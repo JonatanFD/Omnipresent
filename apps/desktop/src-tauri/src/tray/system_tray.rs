@@ -1,4 +1,5 @@
 use crate::state::app_state::AppState;
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
@@ -10,21 +11,21 @@ const TRAY_QUIT_APP: &str = "tray_quit_app";
 
 pub fn create_system_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let show_app = MenuItem::with_id(app, TRAY_SHOW_APP, "Show App", true, None::<&str>)?;
-    let start_server = MenuItem::with_id(
-        app,
-        TRAY_START_SERVER,
-        "Start Server",
-        true,
-        None::<&str>,
-    )?;
-    let stop_server =
-        MenuItem::with_id(app, TRAY_STOP_SERVER, "Stop Server", true, None::<&str>)?;
+    let start_server =
+        MenuItem::with_id(app, TRAY_START_SERVER, "Start Server", true, None::<&str>)?;
+    let stop_server = MenuItem::with_id(app, TRAY_STOP_SERVER, "Stop Server", true, None::<&str>)?;
     let quit_app = MenuItem::with_id(app, TRAY_QUIT_APP, "Quit App", true, None::<&str>)?;
 
     let menu = Menu::with_items(app, &[&show_app, &start_server, &stop_server, &quit_app])?;
 
+    let icon_bytes = include_bytes!("../../icons/tray-icon.png");
+
+    let tray_icon =
+        Image::from_bytes(icon_bytes).expect("Fallo al construir la imagen del tray icon en Tauri");
+
     TrayIconBuilder::new()
         .menu(&menu)
+        .icon(tray_icon)
         .on_menu_event(|app: &AppHandle<R>, event: MenuEvent| {
             let app_handle = app.app_handle();
             match event.id().as_ref() {
