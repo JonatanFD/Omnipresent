@@ -15,67 +15,6 @@ pub struct OmnipresentServer {
 }
 
 impl OmnipresentServer {
-    pub async fn start_discovery_service(
-        port: u16,
-        token: u32,
-        mut shutdown_rx: watch::Receiver<bool>,
-    ) -> io::Result<()> {
-        let discovery_port = port + 1;
-
-        let bind_ip = match local_ip_address::local_ip() {
-            Ok(ip) => ip.to_string(),
-            Err(_) => "0.0.0.0".to_string(),
-        };
-
-        let address = format!("{}:{}", bind_ip, discovery_port);
-
-        let socket = match UdpSocket::bind(&address).await {
-            Ok(s) => s,
-            Err(_) => UdpSocket::bind(format!("0.0.0.0:{}", discovery_port)).await?,
-        };
-
-        if let Err(e) = socket.set_broadcast(true) {
-            warn!("Could not enable broadcast mode: {}", e);
-        }
-
-        info!(
-            "Service discovery active on IP {} (Port {})",
-            bind_ip, discovery_port
-        );
-
-        let mut buf = [0u8; 1024];
-
-        loop {
-            tokio::select! {
-                changed = shutdown_rx.changed() => {
-                    if changed.is_ok() && *shutdown_rx.borrow() {
-                        info!("Discovery service stopped");
-                        return Ok(());
-                    }
-                }
-                recv_result = socket.recv_from(&mut buf) => {
-                    match recv_result {
-                        Ok((len, peer)) => {
-                            let message = String::from_utf8_lossy(&buf[..len]);
-
-                            info!(
-                                "[DISCOVERY] Discovery request received from {}: '{}'",
-                                peer, message
-                            );
-
-                            if message == "OMNIPRESENT_DISCOVERY" {
-                                let response = format!("OMNIPRESENT_HERE|{}|{}", port, token);
-                                let _ = socket.send_to(response.as_bytes(), peer).await;
-                                info!("[DISCOVERY] Discovery response sent to {}", peer);
-                            }
-                        }
-                        Err(e) => error!("Discovery service error: {}", e),
-                    }
-                }
-            }
-        }
-    }
-
     pub async fn bind(tx: mpsc::Sender<TrackpadMessage>, port: u16) -> io::Result<Self> {
         let address = format!("0.0.0.0:{}", port);
 

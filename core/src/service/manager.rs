@@ -5,7 +5,6 @@ use crate::network::{ActionType, TrackpadMessage};
 use crate::security::auth::AuthInfo;
 use crate::service::models::{CoreConnectionInfo, CoreServiceConfig};
 use local_ip_address::local_ip;
-use log::error;
 use std::io;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -37,16 +36,6 @@ impl RunningCoreService {
         };
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let discovery_shutdown_rx = shutdown_rx.clone();
-
-        tokio::spawn(async move {
-            if let Err(err) =
-                OmnipresentServer::start_discovery_service(config.port, token, discovery_shutdown_rx)
-                    .await
-            {
-                error!("Discovery service failed: {}", err);
-            }
-        });
 
         std::thread::spawn(move || {
             let strategy = MouseStrategyFactory::create();
