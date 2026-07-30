@@ -33,9 +33,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     UnhookWindowsHookEx, WH_MOUSE_LL,
 };
 
-/// How many protocol "pixels" one wheel notch carries, aligning Windows wheel
-/// notches with the pixel-based scroll deltas the other platforms report.
-pub(crate) const PIXELS_PER_WHEEL_CLICK: i32 = 24;
+/// How many protocol scroll pixels one Windows wheel notch carries. Taken from
+/// the shared vocabulary so a notch here and a notch on the other machine are
+/// worth the same amount of scrolling.
+pub(crate) const PIXELS_PER_WHEEL_CLICK: i32 = omni_protocol::input::PIXELS_PER_WHEEL_NOTCH;
 
 /// Why a Windows input operation failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

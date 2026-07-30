@@ -26,19 +26,15 @@ use std::thread::JoinHandle;
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_INJECTED,
-    LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW, SetCursorPos, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WHEEL_DELTA, WM_KEYDOWN,
-    WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WM_XBUTTONDOWN, WM_XBUTTONUP, XBUTTON1,
+    CallNextHookEx, DispatchMessageW, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED,
+    LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW, SetCursorPos,
+    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL,
+    WHEEL_DELTA, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+    WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP, XBUTTON1,
 };
 
 use super::{PIXELS_PER_WHEEL_CLICK, screen_center};
-
-/// How many protocol "pixels" one wheel notch carries (mirrors the Linux
-/// adapter so scrolling feels the same across platforms).
-const PIXELS_PER_NOTCH: i32 = PIXELS_PER_WHEEL_CLICK;
 
 // Held-modifier bit positions, matching the `Modifiers` constants.
 const MOD_SHIFT: u8 = 1 << 0;
@@ -270,7 +266,9 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                 Action::Release => MODIFIERS.fetch_and(!bit, Ordering::Relaxed),
             };
         }
-        if let Some(hid) = keymap::hid_from_vk(vk as u16) {
+        // The extended bit is what tells the keypad's Enter from the main one.
+        let extended = info.flags & LLKHF_EXTENDED != 0;
+        if let Some(hid) = keymap::hid_from_vk(vk as u16, extended) {
             emit(InputEvent::Key {
                 code: hid,
                 action,
@@ -340,7 +338,7 @@ fn convert_mouse(message: u32, info: &MSLLHOOKSTRUCT) {
             if notches != 0 {
                 emit(InputEvent::Scroll(ScrollDelta::new(
                     0,
-                    notches * PIXELS_PER_NOTCH,
+                    notches * PIXELS_PER_WHEEL_CLICK,
                 )));
             }
         }
@@ -348,7 +346,7 @@ fn convert_mouse(message: u32, info: &MSLLHOOKSTRUCT) {
             let notches = wheel_delta(info);
             if notches != 0 {
                 emit(InputEvent::Scroll(ScrollDelta::new(
-                    notches * PIXELS_PER_NOTCH,
+                    notches * PIXELS_PER_WHEEL_CLICK,
                     0,
                 )));
             }
