@@ -6,7 +6,10 @@
 //! event so the local OS never acts on it — that is what keeps typing from
 //! landing on both machines while a remote session is active.
 
-use super::convert::{is_modifier_vk, modifiers_from_flags, toggle_modifier};
+use super::convert::{
+    CAPS_LOCK_VK, caps_lock_on as caps_lock_state, caps_lock_tap, is_modifier_vk,
+    modifiers_from_flags, toggle_modifier,
+};
 use super::{MacosInputError, keymap};
 use crate::macos::convert::button_from_cg_number;
 use crate::port::InputSource;
@@ -142,6 +145,12 @@ fn run_tap(
     let callback_port = tap_port.clone();
     // Held-modifier bookkeeping for FlagsChanged events (tap thread only).
     let held_modifiers = Cell::new(0u64);
+    // Caps Lock latches rather than being held, so its state is tracked apart
+    // from the momentary modifiers.
+    let caps_lock_on = Cell::new(false);
+    // Reused so converting an event does not allocate on every keystroke. One OS
+    // event can produce two protocol events (a Caps Lock change is a tap).
+    let mut converted: Vec<InputEvent> = Vec::with_capacity(2);
 
     let interest = vec![
         CGEventType::KeyDown,
@@ -181,8 +190,16 @@ fn run_tap(
             {
                 return CallbackResult::Keep;
             }
-            if let Some(converted) = convert_event(event_type, event, &held_modifiers) {
-                let _ = events.send(converted);
+            converted.clear();
+            convert_event(
+                event_type,
+                event,
+                &held_modifiers,
+                &caps_lock_on,
+                &mut converted,
+            );
+            for event in converted.drain(..) {
+                let _ = events.send(event);
             }
             if suppressed.load(Ordering::Relaxed) {
                 CallbackResult::Drop
@@ -219,9 +236,38 @@ fn run_tap(
     // Run loop stopped (Drop): the tap is disabled when it goes out of scope.
 }
 
-/// Translates one CGEvent into the protocol vocabulary, or `None` for events
-/// we do not carry (unmapped keys, zero scrolls...).
+/// Translates one CGEvent into the protocol vocabulary, appending what it stands
+/// for to `out`.
+///
+/// Most events produce exactly one event, some produce none (unmapped keys, zero
+/// scrolls), and a Caps Lock change produces two — a tap, because Caps Lock
+/// latches. See [`caps_lock_tap`].
 fn convert_event(
+    event_type: CGEventType,
+    event: &CGEvent,
+    held_modifiers: &Cell<u64>,
+    caps_lock_on: &Cell<bool>,
+    out: &mut Vec<InputEvent>,
+) {
+    // Caps Lock arrives as a FlagsChanged like the momentary modifiers, but its
+    // state comes from the flags rather than from tracking presses.
+    if matches!(event_type, CGEventType::FlagsChanged)
+        && event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16 == CAPS_LOCK_VK
+    {
+        let flags = event.get_flags();
+        let previous = caps_lock_on.replace(caps_lock_state(flags));
+        if let Some(tap) = caps_lock_tap(previous, caps_lock_on.get(), modifiers_from_flags(flags))
+        {
+            out.extend(tap);
+        }
+        return;
+    }
+    out.extend(convert_one(event_type, event, held_modifiers));
+}
+
+/// Translates one CGEvent into a single protocol event, or `None` for events
+/// we do not carry (unmapped keys, zero scrolls...).
+fn convert_one(
     event_type: CGEventType,
     event: &CGEvent,
     held_modifiers: &Cell<u64>,

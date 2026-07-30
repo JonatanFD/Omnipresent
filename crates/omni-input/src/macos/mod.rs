@@ -9,6 +9,13 @@
 //! Both require the Accessibility permission (System Settings → Privacy &
 //! Security → Accessibility) — the least privilege macOS offers for this; the
 //! daemon never runs as root.
+//!
+//! One key does not survive the round trip: **Caps Lock**. Capture works — the
+//! source reads the latch from the event flags and sends a tap, so a Mac turning
+//! Caps Lock on turns it on over on the other machine. Injection does not:
+//! `CGEventPost` of the Caps Lock key moves no latch on macOS, which only the
+//! IOKit HID interface can change. A remote machine's Caps Lock therefore has no
+//! effect on a Mac being controlled.
 
 mod convert;
 pub mod keymap;

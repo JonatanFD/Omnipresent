@@ -24,9 +24,10 @@ use std::sync::mpsc;
 /// any device with this name so we never re-capture our own injections.
 const VIRTUAL_DEVICE_NAME: &str = "omnipresent-virtual-input";
 
-/// How many scroll "pixels" one wheel click carries, aligning evdev's
-/// line-based wheel with the pixel-based deltas other platforms report.
-const PIXELS_PER_WHEEL_CLICK: i32 = 24;
+/// How many protocol scroll pixels one evdev wheel click carries. Taken from the
+/// shared vocabulary so a notch here and a notch on the other machine are worth
+/// the same amount of scrolling.
+const PIXELS_PER_WHEEL_CLICK: i32 = omni_protocol::input::PIXELS_PER_WHEEL_NOTCH;
 
 /// Why a Linux input operation failed.
 #[derive(Debug)]

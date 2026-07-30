@@ -43,21 +43,21 @@ impl WindowsSink {
         code: omni_protocol::KeyCode,
         action: Action,
     ) -> Result<(), WindowsInputError> {
-        let Some(vk) = keymap::vk_from_hid(code) else {
+        let Some(key) = keymap::vk_from_hid(code) else {
             return Ok(()); // an unmapped key is dropped, never guessed
         };
         let mut flags = 0;
         if action == Action::Release {
             flags |= KEYEVENTF_KEYUP;
         }
-        if keymap::is_extended_vk(vk) {
+        if key.extended {
             flags |= KEYEVENTF_EXTENDEDKEY;
         }
         let input = INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
                 ki: KEYBDINPUT {
-                    wVk: vk,
+                    wVk: key.vk,
                     wScan: 0,
                     dwFlags: flags,
                     time: 0,

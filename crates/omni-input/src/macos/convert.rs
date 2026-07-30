@@ -42,10 +42,52 @@ pub fn flags_from_modifiers(modifiers: Modifiers) -> CGEventFlags {
     flags
 }
 
+/// The macOS virtual key for Caps Lock, which `FlagsChanged` reports like the
+/// other modifiers even though it latches rather than being held.
+pub const CAPS_LOCK_VK: u16 = 57;
+
 /// Whether a macOS virtual key is a modifier key (reported via `FlagsChanged`
 /// rather than `KeyDown`/`KeyUp`).
 pub fn is_modifier_vk(vk: u16) -> bool {
     matches!(vk, 54..=62)
+}
+
+/// Whether the OS says Caps Lock is currently on.
+pub fn caps_lock_on(flags: CGEventFlags) -> bool {
+    flags.contains(CGEventFlags::CGEventFlagAlphaShift)
+}
+
+/// The events to send for a Caps Lock change.
+///
+/// Caps Lock latches: one press turns it on, the next turns it off. The other
+/// side has its own latch, so what it needs is a *tap* — a press and a release
+/// together — which flips its state to match ours. Treating Caps Lock as
+/// held-down like Shift left the other machine stuck with it on, because the
+/// press and the release arrived as two separate taps of the same key.
+///
+/// Nothing is sent when the state did not actually change, so a repeated report
+/// of the same state cannot flip the other side by accident.
+pub fn caps_lock_tap(
+    previous: bool,
+    now: bool,
+    modifiers: Modifiers,
+) -> Option<[omni_protocol::InputEvent; 2]> {
+    use omni_protocol::{InputEvent, KeyCode};
+    if previous == now {
+        return None;
+    }
+    Some([
+        InputEvent::Key {
+            code: KeyCode::CAPS_LOCK,
+            action: Action::Press,
+            modifiers,
+        },
+        InputEvent::Key {
+            code: KeyCode::CAPS_LOCK,
+            action: Action::Release,
+            modifiers,
+        },
+    ])
 }
 
 /// Press/release bookkeeping for modifier keys. `FlagsChanged` events do not
@@ -194,6 +236,45 @@ mod tests {
             DISTANCE,
         );
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn caps_lock_is_read_from_the_flags_not_inferred() {
+        assert!(caps_lock_on(CGEventFlags::CGEventFlagAlphaShift));
+        assert!(!caps_lock_on(CGEventFlags::CGEventFlagShift));
+    }
+
+    #[test]
+    fn a_caps_lock_change_sends_a_tap() {
+        use omni_protocol::{InputEvent, KeyCode};
+
+        let events = caps_lock_tap(false, true, Modifiers::NONE).expect("turned on");
+        assert_eq!(
+            events,
+            [
+                InputEvent::Key {
+                    code: KeyCode::CAPS_LOCK,
+                    action: Action::Press,
+                    modifiers: Modifiers::NONE,
+                },
+                InputEvent::Key {
+                    code: KeyCode::CAPS_LOCK,
+                    action: Action::Release,
+                    modifiers: Modifiers::NONE,
+                },
+            ]
+        );
+
+        // Turning it back off is also a tap: the other side toggles its own latch.
+        assert!(caps_lock_tap(true, false, Modifiers::NONE).is_some());
+    }
+
+    #[test]
+    fn an_unchanged_caps_lock_state_sends_nothing() {
+        // macOS can report the same state more than once; acting on that would
+        // flip the other machine's Caps Lock when ours did not move.
+        assert!(caps_lock_tap(false, false, Modifiers::NONE).is_none());
+        assert!(caps_lock_tap(true, true, Modifiers::NONE).is_none());
     }
 
     #[test]

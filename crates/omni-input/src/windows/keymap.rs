@@ -6,8 +6,23 @@
 //! deliberately absent: an unmapped key is dropped, never guessed. Left and
 //! right modifiers map to their distinct HID usages, matching what the
 //! low-level keyboard hook reports.
+//!
+//! Two Windows details do not fit a plain table:
+//!
+//! - **Keypad Enter** shares `VK_RETURN` with the main Enter and is told apart
+//!   only by the *extended* bit, while HID gives them separate usages. Both
+//!   directions handle that pair explicitly.
+//! - Several keys need `KEYEVENTF_EXTENDEDKEY` when injected, so a lookup
+//!   returns the flag alongside the virtual key rather than leaving the caller
+//!   to remember.
+//!
+//! Keypad `=` (HID 0x67) stays unmapped: Windows has no virtual key for it on a
+//! standard layout, and the rule here is to drop a key rather than guess.
 
 use omni_protocol::KeyCode;
+
+/// `VK_RETURN`, which serves both the main Enter and the keypad's.
+const VK_RETURN: u16 = 0x0D;
 
 /// Every (Windows virtual key, HID usage) pair we translate. One table, scanned
 /// in both directions, so the two mappings can never disagree. Every virtual
@@ -139,27 +154,68 @@ const VK_HID: &[(u16, u32)] = &[
     (0x5C, 0xE7), // Right Windows (VK_RWIN)
 ];
 
-/// The HID usage for a Windows virtual key, or `None` for keys we do not carry.
-pub fn hid_from_vk(vk: u16) -> Option<KeyCode> {
+/// A Windows key to synthesize: the virtual key, plus whether it needs the
+/// `KEYEVENTF_EXTENDEDKEY` flag to mean the right physical key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VirtualKey {
+    pub vk: u16,
+    pub extended: bool,
+}
+
+impl VirtualKey {
+    const fn plain(vk: u16) -> Self {
+        Self {
+            vk,
+            extended: false,
+        }
+    }
+
+    const fn extended(vk: u16) -> Self {
+        Self { vk, extended: true }
+    }
+}
+
+/// The HID usage for a captured key, or `None` for keys we do not carry.
+///
+/// `extended` is the low-level hook's extended bit, which is the only thing that
+/// distinguishes the keypad's Enter from the main one.
+pub fn hid_from_vk(vk: u16, extended: bool) -> Option<KeyCode> {
+    if vk == VK_RETURN {
+        return Some(if extended {
+            KeyCode::KEYPAD_ENTER
+        } else {
+            KeyCode::RETURN
+        });
+    }
     VK_HID
         .iter()
         .find(|&&(v, _)| v == vk)
         .map(|&(_, hid)| KeyCode::new(hid))
 }
 
-/// The Windows virtual key for a HID usage, or `None` if it has no key here.
-pub fn vk_from_hid(code: KeyCode) -> Option<u16> {
-    VK_HID
+/// The Windows key to synthesize for a HID usage, or `None` if it has none here.
+pub fn vk_from_hid(code: KeyCode) -> Option<VirtualKey> {
+    if code == KeyCode::KEYPAD_ENTER {
+        // Same virtual key as Enter; the extended bit is what makes it the
+        // keypad's.
+        return Some(VirtualKey::extended(VK_RETURN));
+    }
+    let vk = VK_HID
         .iter()
         .find(|&&(_, hid)| hid == code.value())
-        .map(|&(vk, _)| vk)
+        .map(|&(vk, _)| vk)?;
+    Some(if needs_extended_flag(vk) {
+        VirtualKey::extended(vk)
+    } else {
+        VirtualKey::plain(vk)
+    })
 }
 
 /// Whether a virtual key needs the `KEYEVENTF_EXTENDEDKEY` flag when injected.
 /// These are the keys that share a make-code with a keypad key and are told
 /// apart by the extended bit: the grey navigation/arrow cluster, the right-hand
-/// modifiers, keypad divide and enter, and the Windows/menu keys.
-pub fn is_extended_vk(vk: u16) -> bool {
+/// modifiers, keypad divide, and the Windows/menu keys.
+fn needs_extended_flag(vk: u16) -> bool {
     matches!(
         vk,
         0x21 | 0x22 | 0x23 | 0x24 | 0x25 | 0x26 | 0x27 | 0x28 // PgUp/PgDn/End/Home/arrows
@@ -186,34 +242,57 @@ mod tests {
     #[test]
     fn every_mapping_round_trips() {
         for &(vk, hid) in VK_HID {
-            let code = hid_from_vk(vk).expect("forward mapping");
+            let code = hid_from_vk(vk, false).expect("forward mapping");
             assert_eq!(code.value(), hid);
-            assert_eq!(vk_from_hid(code), Some(vk));
+            assert_eq!(vk_from_hid(code).map(|k| k.vk), Some(vk));
         }
     }
 
     #[test]
     fn letters_and_space_map_to_their_hid_usages() {
-        assert_eq!(hid_from_vk(0x41), Some(KeyCode::new(0x04))); // A
-        assert_eq!(vk_from_hid(KeyCode::new(0x2C)), Some(0x20)); // Space
+        assert_eq!(hid_from_vk(0x41, false), Some(KeyCode::new(0x04))); // A
+        assert_eq!(vk_from_hid(KeyCode::new(0x2C)).map(|k| k.vk), Some(0x20)); // Space
     }
 
     #[test]
     fn left_and_right_modifiers_are_distinct() {
-        assert_eq!(hid_from_vk(0xA0), Some(KeyCode::new(0xE1))); // L Shift
-        assert_eq!(hid_from_vk(0xA1), Some(KeyCode::new(0xE5))); // R Shift
+        assert_eq!(hid_from_vk(0xA0, false), Some(KeyCode::new(0xE1))); // L Shift
+        assert_eq!(hid_from_vk(0xA1, false), Some(KeyCode::new(0xE5))); // R Shift
     }
 
     #[test]
     fn unmapped_keys_are_none() {
-        assert_eq!(hid_from_vk(0x07), None); // undefined VK
+        assert_eq!(hid_from_vk(0x07, false), None); // undefined VK
         assert_eq!(vk_from_hid(KeyCode::new(0xFFFF)), None);
     }
 
     #[test]
     fn arrows_and_right_modifiers_are_extended() {
-        assert!(is_extended_vk(0x27)); // Right arrow
-        assert!(is_extended_vk(0xA5)); // Right Alt
-        assert!(!is_extended_vk(0x41)); // A
+        assert!(
+            vk_from_hid(KeyCode::new(0x4F))
+                .expect("right arrow")
+                .extended
+        );
+        assert!(vk_from_hid(KeyCode::new(0xE6)).expect("right alt").extended);
+        assert!(!vk_from_hid(KeyCode::new(0x04)).expect("A").extended);
+    }
+
+    #[test]
+    fn the_keypad_enter_is_not_the_main_enter() {
+        // Both are VK_RETURN; the extended bit is the whole difference. Without
+        // this, Enter on a Mac's keypad reached Windows as nothing at all.
+        assert_eq!(hid_from_vk(VK_RETURN, false), Some(KeyCode::RETURN));
+        assert_eq!(hid_from_vk(VK_RETURN, true), Some(KeyCode::KEYPAD_ENTER));
+
+        let main = vk_from_hid(KeyCode::RETURN).expect("return");
+        let keypad = vk_from_hid(KeyCode::KEYPAD_ENTER).expect("keypad enter");
+        assert_eq!(main, VirtualKey::plain(VK_RETURN));
+        assert_eq!(keypad, VirtualKey::extended(VK_RETURN));
+    }
+
+    #[test]
+    fn the_extended_bit_only_matters_for_return() {
+        // Any other key means the same thing however the hook flagged it.
+        assert_eq!(hid_from_vk(0x41, true), hid_from_vk(0x41, false));
     }
 }
