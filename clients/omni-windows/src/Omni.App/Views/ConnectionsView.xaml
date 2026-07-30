@@ -16,7 +16,7 @@
                     HorizontalAlignment="Center" VerticalAlignment="Center"
                     MaxWidth="360"
                     Visibility="{x:Bind ViewModel.ShowConnectionsEmptyState, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-            <FontIcon Glyph="&#xE8CD;" FontSize="48" HorizontalAlignment="Center"
+            <FontIcon Glyph="&#xE774;" FontSize="48" HorizontalAlignment="Center"
                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <TextBlock Text="Daemon Not Running"
                        Style="{StaticResource SubtitleTextBlockStyle}"

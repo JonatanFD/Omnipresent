@@ -112,15 +112,16 @@ public class OmniBinaryLocatorTests
                 ["PATH"] = @"E:\bin",
             });
 
-        Assert.Equal(
-            [
-                @"D:\tools\omni\omni.exe",
-                Path.Combine(LocalAppData, "Programs", "omni", "omni.exe"),
-                Path.Combine(ProgramFiles, "Omnipresent", "omni.exe"),
-                Path.Combine(UserProfile, ".cargo", "bin", "omni.exe"),
-                @"E:\bin\omni.exe",
-            ],
-            locator.Candidates());
+        var expected = new[]
+        {
+            @"D:\tools\omni\omni.exe",
+            Path.Combine(LocalAppData, "Programs", "omni", "omni.exe"),
+            Path.Combine(ProgramFiles, "Omnipresent", "omni.exe"),
+            Path.Combine(UserProfile, ".cargo", "bin", "omni.exe"),
+            @"E:\bin\omni.exe",
+        };
+
+        Assert.Equal(expected, locator.Candidates());
     }
 
     [Fact]
