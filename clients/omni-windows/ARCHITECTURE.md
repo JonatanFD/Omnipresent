@@ -1,5 +1,24 @@
 # Windows GUI Architecture
 
+## Paridad con macOS (contrato)
+
+La app de Windows debe coincidir con la de macOS (`clients/omni-macos`) en
+**layout, secciones, opciones y disposición de elementos**. El diseño visual sí
+es propio de cada plataforma: aquí se usan tarjetas Fluent y allí `Form
+.grouped`. Lo que no puede divergir:
+
+| Aspecto | Regla |
+|---------|-------|
+| Secciones | General · Connections · System · Update, en ese orden |
+| Panel de navegación | Título "Omnipresent", punto de estado en General, badge de pendientes en Connections |
+| Título del detalle | El nombre de la sección (equivale a `.navigationTitle`) |
+| Orden dentro de cada panel | El mismo que en `MainView.swift` |
+| Etiquetas y textos | Idénticos ("Connect to host", "Screen layout", "Port", …) |
+| Reglas de visibilidad y habilitado | Las decide `DaemonViewModel`, no el XAML |
+
+`MainView.swift` es la referencia. Cualquier cambio de layout en un lado se
+replica en el otro en el mismo cambio.
+
 ## Estructura de navegación
 
 ```
@@ -114,16 +133,17 @@ Extract tag from clicked item
 NavigateToSection(tag: string)
          │
          ▼
-Create view based on tag:
+Reuse the cached pane for the tag, or build it once:
 ┌────────┴────────┬──────────────┬──────────────┬──────────┐
 │                 │              │              │          │
 "general"     "connections"  "system"      "update"        │
 │                 │              │              │          │
 ▼                 ▼              ▼              ▼          ▼
-GeneralView   ConnectionsView SystemView   UpdateView   Other
+GeneralView   ConnectionsView SystemView   UpdateView   (general)
          │
          ▼
-ContentFrame.Content = view instance
+NavView.Header = nombre de la sección
+ContentFrame.Content = panel
          │
          ▼
 View renders with ViewModel bindings
@@ -154,16 +174,27 @@ DaemonViewModel
 App
  └─ MainWindow
      └─ MainView
-         ├─ Header (Title + Status)
          └─ NavigationView
-             ├─ MenuItems (General, Connections, System, Update)
+             ├─ PaneHeader ("Omnipresent")
+             ├─ MenuItems
+             │   ├─ General      (+ punto de estado)
+             │   ├─ Connections  (+ InfoBadge de pendientes)
+             │   ├─ System
+             │   └─ Update
+             ├─ Header (nombre de la sección actual)
              └─ Frame
-                 └─ Current View
+                 └─ Panel actual (instancia cacheada)
                      ├─ GeneralView
                      ├─ ConnectionsView
                      ├─ SystemView
                      └─ UpdateView
 ```
+
+No hay barra de título propia: el estado del daemon vive en el punto del panel
+de navegación y en la fila "Status" de General, igual que en macOS.
+
+Los paneles se construyen una sola vez y se reutilizan, así navegar y volver no
+descarta lo que el usuario escribió.
 
 ## Comparación con macOS
 

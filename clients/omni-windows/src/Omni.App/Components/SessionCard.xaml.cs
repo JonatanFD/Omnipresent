@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Omni.Ipc;
@@ -19,8 +20,6 @@ public sealed partial class SessionCard : UserControl
             typeof(SessionCard),
             new PropertyMetadata(null));
 
-    public string Host => Session?.Host ?? "";
-    public string Role => Session?.Role ?? "";
     public string ButtonLabel { get; set; } = "Disconnect";
 
     public event RoutedEventHandler? ActionClicked;
@@ -30,8 +29,23 @@ public sealed partial class SessionCard : UserControl
         InitializeComponent();
     }
 
-    private void OnButtonClick(object sender, RoutedEventArgs e)
-    {
-        ActionClicked?.Invoke(sender, e);
-    }
+    /// <summary>The peer on the other end of this session.</summary>
+    public string HostLabel(SessionInfo? session) => session?.Host ?? "";
+
+    /// <summary>
+    /// This machine's role, capitalized for display. The daemon sends it
+    /// lowercase ("controller" / "target").
+    /// </summary>
+    public string RoleLabel(SessionInfo? session) => Capitalize(session?.Role ?? "");
+
+    /// <summary>Whether to show the indicator that input is routed here.</summary>
+    public Visibility ActiveIndicator(SessionInfo? session) =>
+        session?.Active == true ? Visibility.Visible : Visibility.Collapsed;
+
+    private static string Capitalize(string text) =>
+        text.Length == 0
+            ? text
+            : string.Concat(text[..1].ToUpper(CultureInfo.CurrentCulture), text[1..]);
+
+    private void OnButtonClick(object sender, RoutedEventArgs e) => ActionClicked?.Invoke(this, e);
 }

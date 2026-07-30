@@ -30,7 +30,9 @@ public partial class App : Application
         _window.Closed += (_, _) => _lifetime.Cancel();
         _window.Activate();
 
-        // Follow the daemon for as long as the app is open; reconnects on its own.
-        _ = _viewModel.RunAsync(_lifetime.Token);
+        // Follow the daemon for as long as the app is open. The view model owns the
+        // loop so `Start daemon` can restart it at once instead of waiting out a
+        // reconnect delay.
+        _viewModel.Start(_lifetime.Token);
     }
 }
