@@ -5,7 +5,26 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-06-29 (the **Windows GUI client** was reorganized into a
+_Last updated: 2026-07-29 (the **Windows GUI** was brought to layout parity with
+the macOS app, and three client defects fixed along the way. The panes now match
+`MainView.swift` section for section: no title bar of its own, the daemon's state
+as a dot on the General navigation entry, a badge with the waiting-request count
+on Connections, the section name as the detail header, the same section order and
+labels in every pane, one edge picker per peer that applies immediately (the host
+field and "Place" button are gone), and a centred "Daemon Not Running" pane when
+there is no daemon and nothing remembered. Two new components — `LabeledRow` and
+`LayoutRow` — carry the row layouts, and the parity contract is written down in
+`clients/omni-windows/ARCHITECTURE.md`. The defects: the app looked for
+`omni.exe` only under `C:\Program Files\Omnipresent` and `~/.cargo/bin`, so
+`Start daemon` and `Update` failed for everyone who installed with the documented
+`install.ps1` (which writes to `%LOCALAPPDATA%\Programs\omni`) — a new
+`OmniBinaryLocator` checks `OMNI_INSTALL_DIR`, the installer's default, a
+machine-wide install, a cargo install, and finally `PATH`; the run loop caught
+only `OmniDaemonException`, so an unexpected error (a decode failure from an
+event a newer daemon added — which the IPC contract calls backward-compatible)
+escaped and froze the window on stale state forever; and `ReconnectNow` was an
+empty method, so the UI sat out the reconnect delay after starting the daemon.
+Earlier: the **Windows GUI client** was reorganized into a
 modular architecture matching the macOS app, and shipped — with a Windows
 uninstall fix — as **v0.5.0**. The monolithic main window split into four views
 (status, connections, peers, settings) behind a `NavigationView` + `Frame`, and

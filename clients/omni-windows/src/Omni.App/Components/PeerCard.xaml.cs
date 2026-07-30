@@ -19,8 +19,6 @@ public sealed partial class PeerCard : UserControl
             typeof(PeerCard),
             new PropertyMetadata(null));
 
-    public string Host => Peer?.Host ?? "(unnamed)";
-    public string Fingerprint => Peer?.Fingerprint ?? "";
     public string ButtonLabel { get; set; } = "Forget";
 
     public event RoutedEventHandler? ActionClicked;
@@ -30,8 +28,11 @@ public sealed partial class PeerCard : UserControl
         InitializeComponent();
     }
 
-    private void OnButtonClick(object sender, RoutedEventArgs e)
-    {
-        ActionClicked?.Invoke(sender, e);
-    }
+    /// <summary>The peer's host, or a placeholder when it was never named.</summary>
+    public string HostLabel(PeerInfo? peer) => peer?.Host ?? "(unnamed)";
+
+    /// <summary>The pinned certificate fingerprint.</summary>
+    public string FingerprintLabel(PeerInfo? peer) => peer?.Fingerprint ?? "";
+
+    private void OnButtonClick(object sender, RoutedEventArgs e) => ActionClicked?.Invoke(this, e);
 }

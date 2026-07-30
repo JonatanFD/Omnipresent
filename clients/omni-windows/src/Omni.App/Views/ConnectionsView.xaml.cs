@@ -1,11 +1,16 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
+using Omni.App.Components;
 using Omni.App.Core;
-using Omni.Ipc;
+using Windows.System;
 
 namespace Omni.App.Views;
 
+/// <summary>
+/// The Connections pane: dial a host, answer incoming requests, manage live
+/// sessions and known peers, and place each peer around the screen. Mirrors the
+/// macOS Connections pane, including which selector each action sends.
+/// </summary>
 public sealed partial class ConnectionsView : UserControl
 {
     public DaemonViewModel ViewModel { get; }
@@ -16,42 +21,52 @@ public sealed partial class ConnectionsView : UserControl
         InitializeComponent();
     }
 
-    public bool IsEmpty => !ViewModel.IsConnected && !ViewModel.HasSessions && !ViewModel.HasPending && !ViewModel.HasPeers && !ViewModel.HasPlacements;
-    public bool IsNotEmpty => !IsEmpty;
+    // Connect is offered only once there is a host to dial, as on macOS.
+    private void OnHostInputChanged(object sender, TextChangedEventArgs e) =>
+        ConnectButton.IsEnabled = HostInput.Text.Trim().Length > 0;
 
-    private async void OnConnectClick(object sender, RoutedEventArgs e)
+    private async void OnHostInputKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            e.Handled = true;
+            await SubmitConnectAsync();
+        }
+    }
+
+    private async void OnConnectClick(object sender, RoutedEventArgs e) => await SubmitConnectAsync();
+
+    private async Task SubmitConnectAsync()
     {
         var host = HostInput.Text.Trim();
-        if (host.Length > 0)
+        if (host.Length == 0)
         {
-            await ViewModel.ConnectAsync(host);
-            HostInput.Text = "";
+            return;
         }
+        await ViewModel.ConnectAsync(host);
+        HostInput.Text = "";
     }
 
     private async void OnAcceptClick(object sender, RoutedEventArgs e)
     {
-        // Find the PendingRequestCard and get its Request
-        if (FindComponentByTag<Components.PendingRequestCard>(sender as FrameworkElement) is { } card
-            && card.Request is { } pending)
+        // The fingerprint is the selector: it is what the user just verified.
+        if (sender is PendingRequestCard { Request: { } request })
         {
-            await ViewModel.AcceptAsync(pending.Fingerprint);
+            await ViewModel.AcceptAsync(request.Fingerprint);
         }
     }
 
     private async void OnRejectClick(object sender, RoutedEventArgs e)
     {
-        if (FindComponentByTag<Components.PendingRequestCard>(sender as FrameworkElement) is { } card
-            && card.Request is { } pending)
+        if (sender is PendingRequestCard { Request: { } request })
         {
-            await ViewModel.RejectAsync(pending.Fingerprint);
+            await ViewModel.RejectAsync(request.Fingerprint);
         }
     }
 
     private async void OnDisconnectClick(object sender, RoutedEventArgs e)
     {
-        if (FindComponentByTag<Components.SessionCard>(sender as FrameworkElement) is { } card
-            && card.Session is { } session)
+        if (sender is SessionCard { Session: { } session })
         {
             await ViewModel.DisconnectAsync(session.Host);
         }
@@ -59,33 +74,19 @@ public sealed partial class ConnectionsView : UserControl
 
     private async void OnForgetPeerClick(object sender, RoutedEventArgs e)
     {
-        if (FindComponentByTag<Components.PeerCard>(sender as FrameworkElement) is { } card
-            && card.Peer is { } peer)
+        // Prefer the host, falling back to the fingerprint for an unnamed peer —
+        // the same selector the macOS pane sends.
+        if (sender is PeerCard { Peer: { } peer })
         {
-            await ViewModel.RemovePeerAsync(peer.Fingerprint);
+            await ViewModel.RemovePeerAsync(peer.Host ?? peer.Fingerprint);
         }
     }
 
-    private async void OnSetLayoutClick(object sender, RoutedEventArgs e)
+    private async void OnLayoutEdgeChanged(object sender, RoutedEventArgs e)
     {
-        var host = LayoutHostInput.Text.Trim();
-        var edge = (EdgeCombo.SelectedItem as ComboBoxItem)?.Content as string;
-        if (host.Length > 0 && !string.IsNullOrEmpty(edge))
+        if (sender is LayoutRow { Placement: { } placement, SelectedEdge: { } edge })
         {
-            await ViewModel.SetLayoutAsync(host, edge);
-            LayoutHostInput.Text = "";
+            await ViewModel.SetLayoutAsync(placement.Host, edge);
         }
-    }
-
-    private static T? FindComponentByTag<T>(FrameworkElement? element) where T : class
-    {
-        // Walk up the visual tree to find a component of type T
-        while (element != null)
-        {
-            if (element is T component)
-                return component;
-            element = VisualTreeHelper.GetParent(element) as FrameworkElement;
-        }
-        return null;
     }
 }
