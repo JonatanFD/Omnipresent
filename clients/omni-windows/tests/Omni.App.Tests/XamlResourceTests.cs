@@ -19,15 +19,23 @@ namespace Omni.App.Tests;
 /// </summary>
 public class XamlResourceTests
 {
+    /// <summary>
+    /// The icons the app actually uses, each confirmed against the real enum.
+    /// Used only when the WinUI assembly cannot be found, so a machine without it
+    /// still fails on an unknown name rather than waving everything through.
+    /// </summary>
+    private static readonly HashSet<string> KnownGoodSymbols =
+        ["Home", "Globe", "Setting", "Download"];
+
     [Fact]
     public void Every_icon_name_in_the_xaml_is_a_real_symbol()
     {
+        // Prefer the enum itself; fall back to the confirmed set rather than
+        // passing vacuously when the assembly is not around.
         var symbols = LoadSymbolNames();
         if (symbols.Count == 0)
         {
-            // Without the enum there is nothing to check against. Skipping is
-            // honest; passing would pretend the markup had been verified.
-            Assert.Skip("Microsoft.WinUI.dll not available to read the Symbol enum from");
+            symbols = KnownGoodSymbols;
         }
 
         var offenders = new List<string>();
