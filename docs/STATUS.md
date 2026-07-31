@@ -5,9 +5,29 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-07-30 (a **cross-platform audit** and its fixes: modifier
-keys, local IPC, input, packaging, and the **Windows GUI** brought to layout
-parity with the macOS app.
+_Last updated: 2026-07-30 (a **cross-platform audit** and its fixes: display
+geometry, modifier keys, local IPC, input, packaging, and the **Windows GUI**
+brought to layout parity with the macOS app.
+
+**The cursor no longer changes speed when it crosses.** A screen's size is
+reported in whatever unit its OS uses, and those units are not the same size: a
+Retina Mac calls itself 1512 wide in points, a DPI-aware Windows machine calls a
+4K panel 3840 wide in pixels. Movement was applied to the peer's screen one unit
+for one, so the cursor crawled on one machine and raced on the other. A movement
+is now rescaled to cover the same *fraction* of the screen it is on, and a
+movement that was not zero never rounds away to nothing.
+
+**A second monitor no longer hands control to a peer.** Only the primary display
+counted, so a cursor moved onto another monitor was recorded as pinned to the
+primary's edge — and the next nudge that way looked exactly like the user pushing
+past the edge, so control jumped to whichever peer sat there. Both adapters now
+report the whole desktop (Windows' virtual screen, the union of macOS's active
+displays) and translate between the OS coordinates and a 0-based desktop space at
+the boundary, so a monitor above or to the left — where Windows uses negative
+coordinates — is handled without the rest of the system knowing.
+
+Re-reading the geometry when displays change is still to do: docking or
+unplugging a monitor needs a daemon restart to be picked up.
 
 **Arm64 Windows is no longer left out.** The GUI project declared `win-arm64`
 but the release only ever built x64, `omni update` had no triple for it, and
@@ -418,6 +438,19 @@ against ports using in-memory adapters.
 
 Everything below is known, deliberate, and ordered roughly by importance:
 
+- **Display changes need a restart.** The desktop's geometry is read once at
+  startup and the size is announced to a peer only when the session is
+  established. Docking, unplugging a monitor, or changing the scaling therefore
+  leaves the virtual desktop describing a screen that no longer exists until the
+  daemon is restarted. Fixing it means re-reading the bounds when the OS says
+  they changed (`WM_DISPLAYCHANGE`, `NSApplication.didChangeScreenParameters`)
+  and telling live peers, which needs one additive control message.
+- **Caps Lock cannot be injected into macOS.** Capture works in both directions,
+  but `CGEventPost` cannot move the Caps Lock latch — only IOKit HID can — so a
+  remote machine's Caps Lock has no effect on a Mac being controlled.
+- **The GUIs do not expose `doctor` or the modifier swap.** `omni modifiers` and
+  the permission checks are CLI-only. Both are worth surfacing, in both clients
+  at once so the layout parity holds.
 - **Automatic reconnection.** `omni connect` between two real machines
   (Windows ↔ macOS) is validated and works, including clipboard. What is missing
   is recovery from a *dropped* link: when the connection fails (network blip,

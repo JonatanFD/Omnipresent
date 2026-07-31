@@ -241,8 +241,15 @@ impl InputSink for WindowsSink {
     }
 
     fn warp(&mut self, x: i32, y: i32) -> Result<(), Self::Error> {
-        // Absolute placement on an edge crossing. SetCursorPos arrives flagged
-        // "injected", so the capture hook skips it.
+        // Absolute placement on an edge crossing. The position is in desktop
+        // space, so it needs the desktop's origin added before the OS will
+        // understand it — they differ whenever a monitor sits above or left of
+        // the primary one. SetCursorPos arrives flagged "injected", so the
+        // capture hook skips it.
+        let (x, y) = match super::desktop_bounds() {
+            Some(bounds) => bounds.to_screen(x, y),
+            None => (x, y),
+        };
         if unsafe { SetCursorPos(x, y) } == 0 {
             return Err(WindowsInputError::Injection);
         }

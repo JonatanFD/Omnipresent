@@ -512,6 +512,17 @@ fn sync_cursor_to_os(state: &mut State, shared: &Shared) {
 /// Moves the virtual cursor. Returns `true` when the move crossed an edge
 /// (and the crossing was handled), `false` when it stayed on screen.
 fn advance_cursor(state: &mut State, shared: &Shared, delta: omni_protocol::MouseDelta) -> bool {
+    // The movement was measured on this machine's screen, in whatever unit this
+    // OS reports. While the cursor is on a peer it has to move by the same
+    // *fraction* of that peer's screen, or it visibly changes speed at the
+    // crossing — a Retina Mac and a 4K PC describe their screens in units that
+    // are nowhere near the same size.
+    let delta = match state.layout.screen(state.cursor.machine) {
+        Some(screen) if state.cursor.machine != shared.local_machine => {
+            omni_topology::scale_delta(delta, shared.local_screen, screen)
+        }
+        _ => delta,
+    };
     let advance = match state.layout.advance(state.cursor, delta) {
         Ok(advance) => advance,
         Err(e) => {

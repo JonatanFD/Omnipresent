@@ -29,4 +29,4 @@ pub use macos as platform;
 pub use windows as platform;
 
 pub use memory::{QueuedSource, RecordingSink};
-pub use port::{InputSink, InputSource};
+pub use port::{DesktopBounds, InputSink, InputSource};
