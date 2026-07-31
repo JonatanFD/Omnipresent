@@ -53,6 +53,10 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(8);
 /// How often the daemon checks the local clipboard for a new copy when sharing
 /// is enabled. Fast enough to feel instant, slow enough to be free.
 const CLIPBOARD_POLL: Duration = Duration::from_millis(500);
+/// How long shutdown waits for tasks to finish before stopping anyway. Long
+/// enough for orderly work to complete, short enough that the daemon always
+/// exits rather than lingering with its socket held.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 /// Something a peer task is asked to do.
 #[derive(Debug, PartialEq)]
@@ -224,7 +228,7 @@ pub fn run_with_paths(paths: Paths) -> Result<(), DaemonError> {
     );
 
     let runtime = tokio::runtime::Runtime::new().map_err(|e| fail("tokio runtime", e))?;
-    runtime.block_on(async {
+    let result = runtime.block_on(async {
         let endpoint = QuicEndpoint::bind(
             SocketAddr::from(([0, 0, 0, 0], config.port())),
             &identity,
@@ -314,22 +318,43 @@ pub fn run_with_paths(paths: Paths) -> Result<(), DaemonError> {
         });
 
         // IPC for the CLI: a Unix socket or a Windows named pipe, owner-scoped.
+        //
+        // Every task serving a client holds a clone of `alive`. None of them ever
+        // sends on it; it exists so that when the last one ends, the receiver
+        // reports the channel closed. That is how shutdown knows every client
+        // connection has actually been let go — a client blocked reading needs
+        // our end closed before it will ever return, and dropping the runtime
+        // does not promise that.
         let mut listener = IpcListener::bind(&paths).map_err(|e| fail("IPC channel", e))?;
+        let (alive, mut all_clients_done) = mpsc::channel::<()>(1);
         let ipc_shared = shared.clone();
+        let accept_alive = alive.clone();
+        let mut accept_shutdown = shared.shutting_down.subscribe();
         tokio::spawn(async move {
             loop {
-                match listener.accept().await {
-                    Ok(stream) => {
-                        let shared = ipc_shared.clone();
-                        tokio::spawn(handle_client(shared, stream));
-                    }
-                    Err(e) => {
-                        tracing::warn!(%e, "IPC accept failed");
-                        break;
-                    }
+                tokio::select! {
+                    accepted = listener.accept() => match accepted {
+                        Ok(stream) => {
+                            let shared = ipc_shared.clone();
+                            let alive = accept_alive.clone();
+                            tokio::spawn(async move {
+                                handle_client(shared, stream).await;
+                                drop(alive);
+                            });
+                        }
+                        Err(e) => {
+                            tracing::warn!(%e, "IPC accept failed");
+                            break;
+                        }
+                    },
+                    // Stop accepting, and let go of this task's own token.
+                    _ = accept_shutdown.changed() => break,
                 }
             }
         });
+        // The daemon's own token, dropped below so only the client tasks keep the
+        // channel open.
+        drop(alive);
 
         tracing::info!("daemon ready");
         wait_for_shutdown(&shared).await;
@@ -340,8 +365,21 @@ pub fn run_with_paths(paths: Paths) -> Result<(), DaemonError> {
         let _ = shared.shutting_down.send(true);
         disconnect_all(&shared);
         shared.endpoint.close();
+        // Wait for every client task to actually end, so their connections are
+        // closed and anyone reading one gets end-of-stream rather than waiting
+        // for a daemon that has already gone. Bounded, so a stuck client can
+        // never keep the daemon alive.
+        let _ = tokio::time::timeout(SHUTDOWN_GRACE, all_clients_done.recv()).await;
         Ok(())
-    })
+    });
+
+    // Dropping the runtime waits for the blocking pool, and clipboard reads live
+    // there — the OS clipboard is a global lock any application may be holding,
+    // so one can be slow or wedged through no fault of ours. Stopping with a
+    // deadline means the daemon always exits: it gives tasks a moment to unwind
+    // cleanly and then goes anyway.
+    runtime.shutdown_timeout(SHUTDOWN_GRACE);
+    result
 }
 
 fn init_logging(paths: &Paths) {
@@ -578,14 +616,19 @@ fn forward_to(state: &State, peer: MachineId, event: InputEvent) {
 /// Polls the local clipboard and broadcasts any new copy to every connected
 /// peer over their reliable control streams. It parks for free while sharing is
 /// off and polls only while it is on, so the opt-in default costs nothing and
-/// the toggle takes effect at once. Ends when the daemon shuts down (the toggle
-/// sender is dropped).
+/// the toggle takes effect at once. Ends when the daemon shuts down.
 async fn run_clipboard(shared: Arc<Shared>, mut enabled: watch::Receiver<bool>) {
+    let mut shutting_down = shared.shutting_down.subscribe();
     loop {
         // Park until sharing is turned on. No clipboard read happens here.
         while !*enabled.borrow() {
-            if enabled.changed().await.is_err() {
-                return; // daemon shutting down
+            tokio::select! {
+                changed = enabled.changed() => {
+                    if changed.is_err() {
+                        return; // daemon shutting down
+                    }
+                }
+                _ = shutting_down.changed() => return,
             }
         }
         // Sharing is on: poll until it is turned back off.
@@ -593,7 +636,7 @@ async fn run_clipboard(shared: Arc<Shared>, mut enabled: watch::Receiver<bool>) 
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
-                _ = interval.tick() => broadcast_local_clipboard(&shared),
+                _ = interval.tick() => broadcast_local_clipboard(&shared).await,
                 changed = enabled.changed() => {
                     if changed.is_err() {
                         return; // daemon shutting down
@@ -602,6 +645,9 @@ async fn run_clipboard(shared: Arc<Shared>, mut enabled: watch::Receiver<bool>) 
                         break; // back to parking
                     }
                 }
+                // Stop before the next poll: reading the clipboard blocks, and a
+                // shutdown should not have to wait behind one.
+                _ = shutting_down.changed() => return,
             }
         }
     }
@@ -610,14 +656,23 @@ async fn run_clipboard(shared: Arc<Shared>, mut enabled: watch::Receiver<bool>) 
 /// Reads the local clipboard and, on a genuinely new copy, sends it to every
 /// connected peer — not just the active target, so it is available wherever the
 /// user pastes. The manager's echo guard stops it bouncing back.
-fn broadcast_local_clipboard(shared: &Arc<Shared>) {
-    let data = match shared.clipboard.poll_local_change() {
-        Ok(Some(data)) => data,
-        Ok(None) | Err(ClipboardError::Disabled) => return,
-        Err(e) => {
+///
+/// Reading the OS clipboard *blocks*, and on Windows it can block for a while:
+/// the clipboard is a single global lock that any application may be holding.
+/// Doing that directly on an async worker stalls every other task sharing the
+/// thread, and stalls shutdown behind it. It goes to the blocking pool instead.
+async fn broadcast_local_clipboard(shared: &Arc<Shared>) {
+    let reader = shared.clone();
+    let read = tokio::task::spawn_blocking(move || reader.clipboard.poll_local_change()).await;
+    let data = match read {
+        Ok(Ok(Some(data))) => data,
+        Ok(Ok(None)) | Ok(Err(ClipboardError::Disabled)) => return,
+        Ok(Err(e)) => {
             tracing::warn!(%e, "could not read the local clipboard");
             return;
         }
+        // The blocking pool is going away with the runtime; nothing to report.
+        Err(_) => return,
     };
     let state = shared.lock();
     for link in state.links.values() {
@@ -1144,6 +1199,14 @@ where
 {
     let mut changes = shared.changes.subscribe();
     let mut shutting_down = shared.shutting_down.subscribe();
+    // Subscribing only arms us for *later* changes, so a shutdown that already
+    // began is invisible to `changed()`. Without this check a subscription that
+    // arrives in that window waits on a client that is waiting on us, and the
+    // daemon never finishes exiting — the same deadlock the signal exists to
+    // prevent, just through a narrower door.
+    if *shutting_down.borrow() {
+        return;
+    }
     if !write_event(write, &Event::Status(status(shared))).await {
         return;
     }
