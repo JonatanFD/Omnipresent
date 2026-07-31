@@ -5,8 +5,38 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-07-29 (the **Windows GUI** was brought to layout parity with
-the macOS app, and three client defects fixed along the way. The panes now match
+_Last updated: 2026-07-29 (a **cross-platform input audit** and its fixes, plus
+the **Windows GUI** brought to layout parity with the macOS app.
+
+**Input, both directions.** A wheel notch now means the same amount of scrolling
+whichever way a session runs: the unit lives in the shared vocabulary as
+`PIXELS_PER_WHEEL_NOTCH` instead of Windows and Linux each picking their own
+number with nothing tying it to what macOS reports. **Keypad Enter** survives the
+trip — Windows puts it on `VK_RETURN` and separates it with the extended bit,
+which capture ignored and injection had no entry for, so it used to vanish
+entirely. **Caps Lock** is treated as the latch it is: its state comes from the
+macOS event flags rather than being inferred from presses, and a change sends a
+tap so the other machine flips its own latch (it used to arrive as two taps and
+leave the other side stuck on). Injecting Caps Lock *into* macOS still does
+nothing — only IOKit HID can move that latch — which is now documented in the
+adapter rather than left to be discovered.
+
+**Windows injection and capture robustness.** The Windows sink ignored the
+`modifiers` each key event carries and relied on the OS state built from received
+key-downs; since input rides unreliable datagrams, one lost packet produced the
+wrong chord or left a modifier stuck down for good. It now compares what it has
+injected against what the controller had held and makes up the difference before
+pressing the key — the self-correcting behaviour macOS already had from stamping
+flags on every event. And because Windows silently removes a low-level hook whose
+callback overran `LowLevelHooksTimeout` without telling anyone (capture stops,
+`poll` still answers "nothing right now", and `omni status` goes on claiming
+capture is running), the hook thread now re-arms both hooks on a timer and gives
+up the event channel if that fails, so the daemon stops advertising capture that
+is not happening. macOS handles the same situation through its explicit
+`TapDisabledByTimeout` event.
+
+**The Windows GUI** was brought to layout parity with the macOS app, and three
+client defects fixed along the way. The panes now match
 `MainView.swift` section for section: no title bar of its own, the daemon's state
 as a dot on the General navigation entry, a badge with the waiting-request count
 on Connections, the section name as the detail header, the same section order and
