@@ -5,8 +5,19 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-07-30 (a **cross-platform audit** and its fixes: local IPC,
-input, and the **Windows GUI** brought to layout parity with the macOS app.
+_Last updated: 2026-07-30 (a **cross-platform audit** and its fixes: modifier
+keys, local IPC, input, and the **Windows GUI** brought to layout parity with the
+macOS app.
+
+**Command and Control can be swapped per peer.** Copy is Command-C on a Mac and
+Control-C everywhere else, and each machine faithfully sends the key it was
+given — so a Mac driving a PC sent Windows-C and a PC driving a Mac sent
+Control-C, neither of which copies. Nothing in the protocol says what a peer runs
+on, and plenty of people want the keys left alone, so this is a per-host choice:
+`omni modifiers <host> meta-control`. The controller relabels events on the way
+out (both the key code and the modifier set carried with it, or the two would
+disagree), so the target injects what it receives and needs to know nothing. Off
+by default.
 
 **A shutdown deadlock, found while verifying the rest.** After `omni stop` the
 daemon logged "shutting down" and then never finished exiting: a subscription

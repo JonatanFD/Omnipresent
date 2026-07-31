@@ -46,6 +46,13 @@ pub enum Request {
     /// Turn opt-in clipboard sharing on or off at runtime. The choice is
     /// persisted to the config so it survives a daemon restart.
     Clipboard { enabled: bool },
+    /// Inspect or change how modifier keys are relabelled for a peer. With
+    /// `host` and `swap` set, apply that swap to the host; with both `None`,
+    /// list what is configured.
+    Modifiers {
+        host: Option<String>,
+        swap: Option<String>,
+    },
 }
 
 /// The daemon's answer.
@@ -68,6 +75,20 @@ pub enum Response {
     Layout {
         placements: Vec<LayoutInfo>,
     },
+    Modifiers {
+        swaps: Vec<ModifierInfo>,
+    },
+}
+
+/// How one peer's modifier keys are relabelled, as `omni modifiers` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModifierInfo {
+    pub host: String,
+    /// The swap in force: "none" or "meta-control".
+    pub swap: String,
+    /// Whether this is from a live session (`true`) or only saved in the config
+    /// for the next time the peer connects (`false`).
+    pub connected: bool,
 }
 
 /// A pushed update sent on a [`Request::Subscribe`] connection. Each event is one

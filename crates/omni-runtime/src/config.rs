@@ -6,6 +6,7 @@
 //! runs): the identity key pair, the trust store, the config file, the IPC
 //! socket, and the daemon log.
 
+use omni_protocol::ModifierSwap;
 use omni_topology::Edge;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -107,6 +108,11 @@ pub struct Config {
     /// before this field existed loads as `false`.
     #[serde(default)]
     pub clipboard_sharing_enabled: bool,
+    /// How to relabel modifier keys sent to a given host, keyed by host. Lets a
+    /// Mac and a PC swap Command for Control so shortcuts keep working across
+    /// them. A host not listed here has its keys sent unchanged.
+    #[serde(default)]
+    pub modifier_swaps: HashMap<String, ModifierSwap>,
 }
 
 impl Config {
@@ -117,6 +123,11 @@ impl Config {
     /// The configured edge for a peer host, if one was set.
     pub fn edge_for(&self, host: &str) -> Option<Edge> {
         self.placements.get(host).copied()
+    }
+
+    /// How to relabel modifiers for a peer host — nothing, unless configured.
+    pub fn modifier_swap_for(&self, host: &str) -> ModifierSwap {
+        self.modifier_swaps.get(host).copied().unwrap_or_default()
     }
 
     /// Loads the config file, or defaults if it does not exist.
@@ -181,11 +192,14 @@ mod tests {
         let paths = Paths::at(temp_dir("roundtrip"));
         let mut placements = HashMap::new();
         placements.insert("laptop".to_string(), Edge::Top);
+        let mut modifier_swaps = HashMap::new();
+        modifier_swaps.insert("laptop".to_string(), ModifierSwap::MetaAndControl);
         let config = Config {
             port: Some(5000),
             screen: Some((1920, 1080)),
             placements,
             clipboard_sharing_enabled: true,
+            modifier_swaps,
         };
         std::fs::write(paths.config_file(), serde_json::to_vec(&config).unwrap()).unwrap();
 
@@ -214,6 +228,25 @@ mod tests {
         let loaded = Config::load(&paths).unwrap();
         assert_eq!(loaded.port(), 4733);
         assert!(loaded.placements.is_empty());
+        // And a host with no entry keeps its keys as they were pressed.
+        assert_eq!(loaded.modifier_swap_for("mac"), ModifierSwap::None);
+    }
+
+    #[test]
+    fn a_modifier_swap_round_trips_through_the_file() {
+        let paths = Paths::at(temp_dir("swap"));
+        let mut config = Config::default();
+        config
+            .modifier_swaps
+            .insert("mac".to_string(), ModifierSwap::MetaAndControl);
+        config.save(&paths).unwrap();
+
+        let loaded = Config::load(&paths).unwrap();
+        assert_eq!(
+            loaded.modifier_swap_for("mac"),
+            ModifierSwap::MetaAndControl
+        );
+        assert_eq!(loaded.modifier_swap_for("other"), ModifierSwap::None);
     }
 
     #[test]
