@@ -9,6 +9,7 @@ pub mod clipboard;
 pub mod control;
 pub mod ids;
 pub mod input;
+pub mod remap;
 pub mod wire;
 
 // Flattened re-exports so callers write `omni_protocol::InputEvent` rather than
@@ -17,4 +18,5 @@ pub use clipboard::{ClipboardData, ClipboardImage, ClipboardValidationError, MAX
 pub use control::{ControlMessage, RejectReason, ScreenSize};
 pub use ids::{Fingerprint, MachineId, PeerId, SessionId};
 pub use input::{Action, InputEvent, KeyCode, Modifiers, MouseButton, MouseDelta, ScrollDelta};
+pub use remap::ModifierSwap;
 pub use wire::{CodecError, Message, decode, encode};

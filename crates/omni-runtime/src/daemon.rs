@@ -12,8 +12,8 @@
 
 use crate::config::{Config, Paths};
 use crate::ipc::{
-    Event, LayoutInfo, PROTOCOL_VERSION, PeerInfo, PendingInfo, Request, Response, SessionInfo,
-    StatusInfo,
+    Event, LayoutInfo, ModifierInfo, PROTOCOL_VERSION, PeerInfo, PendingInfo, Request, Response,
+    SessionInfo, StatusInfo,
 };
 use crate::ipc_transport::{IpcListener, IpcStream};
 use crate::ratelimit::RateLimiter;
@@ -24,8 +24,8 @@ use omni_clipboard::service::ClipboardManager;
 use omni_input::platform::{OsSink, OsSource};
 use omni_input::{InputSink, InputSource};
 use omni_protocol::{
-    ClipboardData, ControlMessage, Fingerprint, InputEvent, MachineId, Message, RejectReason,
-    ScreenSize, SessionId,
+    ClipboardData, ControlMessage, Fingerprint, InputEvent, MachineId, Message, ModifierSwap,
+    RejectReason, ScreenSize, SessionId,
 };
 use omni_session::{ActiveTarget, Role, SessionEvent, SessionEvents, SessionManager};
 use omni_topology::{Crossing, CursorState, Edge, Machine, Point, Screen, VirtualLayout};
@@ -75,6 +75,8 @@ struct PeerLink {
     screen: Screen,
     /// Which local edge this peer sits past.
     edge: Edge,
+    /// How to relabel modifier keys on the way to this peer.
+    modifier_swap: ModifierSwap,
     commands: mpsc::UnboundedSender<PeerCommand>,
 }
 
@@ -104,6 +106,8 @@ struct State {
     /// Configured edge per peer host (from `omni layout`); overrides the
     /// default placement when that host connects.
     placements: HashMap<String, Edge>,
+    /// Configured modifier relabelling per peer host (from `omni modifiers`).
+    modifier_swaps: HashMap<String, ModifierSwap>,
 }
 
 /// Everything the tasks share.
@@ -246,6 +250,7 @@ pub fn run_with_paths(paths: Paths) -> Result<(), DaemonError> {
                 links: HashMap::new(),
                 pending: Vec::new(),
                 placements: config.placements.clone(),
+                modifier_swaps: config.modifier_swaps.clone(),
             }),
             trust,
             endpoint,
@@ -546,6 +551,10 @@ fn place_cursor_after_crossing(state: &State, shared: &Shared, crossing: Crossin
 
 fn forward_to(state: &State, peer: MachineId, event: InputEvent) {
     if let Some(link) = state.links.get(&peer) {
+        // Relabel modifiers here, on the way out: the controller is the side that
+        // knows which peer this is going to, so the target can inject whatever it
+        // receives without knowing anything about us.
+        let event = link.modifier_swap.apply(event);
         let _ = link.commands.send(PeerCommand::Input(event));
     }
 }
@@ -680,6 +689,7 @@ async fn handle_incoming(shared: Arc<Shared>, connection: QuicConnection) {
                 // The controller reached us, so by default it sits past our
                 // left edge — unless `omni layout` placed this host elsewhere.
                 let edge = state.placements.get(&host).copied().unwrap_or(Edge::Left);
+                let modifier_swap = state.modifier_swaps.get(&host).copied().unwrap_or_default();
                 state.links.insert(
                     machine,
                     PeerLink {
@@ -689,6 +699,7 @@ async fn handle_incoming(shared: Arc<Shared>, connection: QuicConnection) {
                         role: Role::Target,
                         screen: Screen::new(screen.width, screen.height),
                         edge,
+                        modifier_swap,
                         commands: commands_tx,
                     },
                 );
@@ -795,6 +806,7 @@ async fn do_connect(shared: &Arc<Shared>, host_arg: &str) -> Result<(), String> 
         // We dialed it: it sits past our right edge unless `omni layout` placed
         // this host somewhere else.
         let edge = state.placements.get(&host).copied().unwrap_or(Edge::Right);
+        let modifier_swap = state.modifier_swaps.get(&host).copied().unwrap_or_default();
         state.links.insert(
             machine,
             PeerLink {
@@ -804,6 +816,7 @@ async fn do_connect(shared: &Arc<Shared>, host_arg: &str) -> Result<(), String> 
                 role: Role::Controller,
                 screen: Screen::new(screen.width, screen.height),
                 edge,
+                modifier_swap,
                 commands: commands_tx,
             },
         );
@@ -1226,7 +1239,90 @@ async fn dispatch(shared: &Arc<Shared>, request: Request) -> Response {
             },
         },
         Request::Clipboard { enabled } => set_clipboard(shared, enabled),
+        Request::Modifiers { host, swap } => match (host, swap) {
+            (Some(host), Some(swap)) => set_modifier_swap(shared, &host, &swap),
+            (None, None) => Response::Modifiers {
+                swaps: list_modifier_swaps(shared),
+            },
+            _ => Response::Error {
+                message: "give both a host and a swap to set one, or neither to \
+                          list them"
+                    .into(),
+            },
+        },
     }
+}
+
+/// Sets how modifier keys are relabelled for a peer host: records it, persists
+/// it, and applies it to any live session with that host straight away.
+fn set_modifier_swap(shared: &Arc<Shared>, host: &str, swap: &str) -> Response {
+    let Some(swap) = ModifierSwap::parse(swap) else {
+        return Response::Error {
+            message: format!("unknown swap '{swap}' — use none or meta-control"),
+        };
+    };
+
+    {
+        let mut state = shared.lock();
+        state.modifier_swaps.insert(host.to_string(), swap);
+        let live: Vec<MachineId> = state
+            .links
+            .iter()
+            .filter(|(_, link)| link.host == host)
+            .map(|(machine, _)| *machine)
+            .collect();
+        for machine in live {
+            if let Some(link) = state.links.get_mut(&machine) {
+                link.modifier_swap = swap;
+            }
+        }
+    }
+    notify_change(shared);
+
+    match Config::load(&shared.paths) {
+        Ok(mut config) => {
+            config.modifier_swaps.insert(host.to_string(), swap);
+            if let Err(e) = config.save(&shared.paths) {
+                return Response::Error {
+                    message: format!("applied for now, but could not save it: {e}"),
+                };
+            }
+        }
+        Err(e) => {
+            return Response::Error {
+                message: format!("applied for now, but could not read the config to save it: {e}"),
+            };
+        }
+    }
+    Response::Ok
+}
+
+/// Lists the modifier swaps: live sessions first, then saved-but-not-connected
+/// hosts.
+fn list_modifier_swaps(shared: &Arc<Shared>) -> Vec<ModifierInfo> {
+    let state = shared.lock();
+    let mut swaps = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for link in state.links.values() {
+        seen.insert(link.host.clone());
+        swaps.push(ModifierInfo {
+            host: link.host.clone(),
+            swap: link.modifier_swap.name().to_string(),
+            connected: true,
+        });
+    }
+    for (host, swap) in &state.modifier_swaps {
+        if seen.contains(host) {
+            continue;
+        }
+        swaps.push(ModifierInfo {
+            host: host.clone(),
+            swap: swap.name().to_string(),
+            connected: false,
+        });
+    }
+    swaps.sort_by(|a, b| a.host.cmp(&b.host));
+    swaps
 }
 
 /// Parses an edge name. Accepts the four edges and the up/down synonyms.
