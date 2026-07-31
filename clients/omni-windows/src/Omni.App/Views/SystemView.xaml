@@ -7,13 +7,15 @@
     <ScrollViewer Padding="24">
         <StackPanel Spacing="18" MaxWidth="640">
 
-            <!-- Clipboard -->
+            <!-- Section: Clipboard. Off by default and only changeable while
+                 there is a daemon to tell, as on macOS. -->
             <StackPanel Spacing="8">
                 <TextBlock Text="Clipboard" Style="{StaticResource SubtitleTextBlockStyle}" />
                 <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="12">
-                    <ToggleSwitch Header="Share clipboard with peers"
+                    <ToggleSwitch x:Name="ClipboardToggle"
+                                  Header="Share clipboard with connected peers"
                                   IsOn="{x:Bind ViewModel.ClipboardSharing, Mode=OneWay}"
                                   IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
                                   Toggled="OnClipboardToggled" />

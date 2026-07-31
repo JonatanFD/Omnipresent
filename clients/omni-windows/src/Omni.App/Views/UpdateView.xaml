@@ -3,45 +3,49 @@
     x:Class="Omni.App.Views.UpdateView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:Microsoft.UI.Xaml.Controls">
+    xmlns:components="using:Omni.App.Components">
 
     <ScrollViewer Padding="24">
         <StackPanel Spacing="18" MaxWidth="640">
 
-            <!-- Version info -->
-            <StackPanel Spacing="8" Visibility="{x:Bind ViewModel.DaemonVersion, Mode=OneWay, Converter={StaticResource EmptyStringToVisibilityConverter}}">
-                <TextBlock Text="Version" Style="{StaticResource SubtitleTextBlockStyle}" />
-                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="12">
-                    <TextBlock Text="{x:Bind ViewModel.DaemonVersion, Mode=OneWay}" />
-                </Border>
-            </StackPanel>
+            <!-- The version in place, when the daemon has told us one. -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="12"
+                    Visibility="{x:Bind ViewModel.HasDaemonVersion, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                <components:LabeledRow Label="Installed version"
+                                       Value="{x:Bind ViewModel.DisplayVersion, Mode=OneWay}" />
+            </Border>
 
-            <!-- Update button -->
-            <StackPanel Spacing="8">
-                <TextBlock Text="Updates" Style="{StaticResource SubtitleTextBlockStyle}" />
-                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="12">
-                    <StackPanel Spacing="12">
-                        <Button x:Name="UpdateButton" Click="OnUpdateClick">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <ProgressRing x:Name="UpdateProgress" IsActive="False" Width="20" Height="20" />
-                                <TextBlock Text="Update Omnipresent" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Button>
-                        <TextBlock x:Name="UpdateMessage" Text=""
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   TextWrapping="Wrap"
-                                   Visibility="Collapsed" />
-                        <TextBlock Text="Downloads and installs the latest release, then restarts the daemon."
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   Style="{StaticResource CaptionTextBlockStyle}" />
-                    </StackPanel>
-                </Border>
-            </StackPanel>
+            <!-- The action, its result, and what it will do. -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="12">
+                <StackPanel Spacing="12">
+                    <Button x:Name="UpdateButton" Click="OnUpdateClick" HorizontalAlignment="Left">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ProgressRing x:Name="UpdateProgress"
+                                          IsActive="False"
+                                          Visibility="Collapsed"
+                                          Width="16" Height="16" />
+                            <TextBlock x:Name="UpdateButtonLabel"
+                                       Text="Update Omnipresent"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+
+                    <TextBlock x:Name="UpdateMessage" Text=""
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               TextWrapping="Wrap"
+                               Visibility="Collapsed" />
+
+                    <TextBlock Text="Downloads and installs the latest release, then restarts the daemon."
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
 
         </StackPanel>
     </ScrollViewer>

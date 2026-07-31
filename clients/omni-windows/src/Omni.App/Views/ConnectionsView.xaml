@@ -6,37 +6,61 @@
     xmlns:ipc="using:Omni.Ipc"
     xmlns:components="using:Omni.App.Components">
 
-    <ScrollViewer Padding="24">
-        <StackPanel Spacing="18" MaxWidth="640">
+    <!-- Connect, incoming requests, sessions, peers and layout all live here,
+         because they are all about managing peers — the same grouping and the
+         same order as the macOS Connections pane. -->
+    <Grid>
+        <!-- With no daemon and nothing remembered, the pane is a single centred
+             message rather than an empty scroll area. -->
+        <StackPanel Spacing="12"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    MaxWidth="360"
+                    Visibility="{x:Bind ViewModel.ShowConnectionsEmptyState, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+            <FontIcon Glyph="&#xE774;" FontSize="48" HorizontalAlignment="Center"
+                      Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="Daemon Not Running"
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       TextAlignment="Center" />
+            <TextBlock Text="Start the daemon from General to connect to peers."
+                       Style="{StaticResource BodyTextBlockStyle}"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
 
-            <!-- Empty state -->
-            <StackPanel x:Name="EmptyStatePanel"
-                        Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Visibility="{x:Bind IsEmpty, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                <FontIcon Glyph="&#xE774;" FontSize="48" HorizontalAlignment="Center"
-                          Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Text="Daemon Not Running" Style="{StaticResource TitleTextBlockStyle}" TextAlignment="Center" />
-                <TextBlock Text="Start the daemon from General to connect to peers."
-                           Style="{StaticResource BodyTextBlockStyle}" TextAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
+        <ScrollViewer Padding="24"
+                      Visibility="{x:Bind ViewModel.ShowConnectionsContent, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel Spacing="18" MaxWidth="640">
 
-            <!-- Content (visible when there's data or daemon is connected) -->
-            <StackPanel Spacing="18" Visibility="{x:Bind IsNotEmpty, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-
-                <!-- Connect input -->
-                <StackPanel Spacing="8" Visibility="{x:Bind ViewModel.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock Text="Connect to a peer" Style="{StaticResource SubtitleTextBlockStyle}" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <TextBox x:Name="HostInput" PlaceholderText="host or host:port" Width="280"
-                                 IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}" />
-                        <Button Content="Connect" Style="{StaticResource AccentButtonStyle}"
-                                IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
-                                Click="OnConnectClick" />
-                    </StackPanel>
+                <!-- Section: Connect to host -->
+                <StackPanel Spacing="8"
+                            Visibility="{x:Bind ViewModel.IsConnected, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="Connect to host" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="8" Padding="12">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     x:Name="HostInput"
+                                     PlaceholderText="Host or IP address"
+                                     TextChanged="OnHostInputChanged"
+                                     KeyDown="OnHostInputKeyDown" />
+                            <Button Grid.Column="1"
+                                    x:Name="ConnectButton"
+                                    Content="Connect"
+                                    IsEnabled="False"
+                                    Click="OnConnectClick" />
+                        </Grid>
+                    </Border>
                 </StackPanel>
 
-                <!-- Incoming requests -->
-                <StackPanel Spacing="8" Visibility="{x:Bind ViewModel.HasPending, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                <!-- Section: Incoming requests -->
+                <StackPanel Spacing="8"
+                            Visibility="{x:Bind ViewModel.HasPending, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                     <TextBlock Text="Incoming requests" Style="{StaticResource SubtitleTextBlockStyle}" />
                     <ItemsControl ItemsSource="{x:Bind ViewModel.Pending, Mode=OneWay}">
                         <ItemsControl.ItemTemplate>
@@ -49,21 +73,23 @@
                     </ItemsControl>
                 </StackPanel>
 
-                <!-- Active sessions -->
-                <StackPanel Spacing="8" Visibility="{x:Bind ViewModel.HasSessions, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                <!-- Section: Active sessions -->
+                <StackPanel Spacing="8"
+                            Visibility="{x:Bind ViewModel.HasSessions, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                     <TextBlock Text="Active sessions" Style="{StaticResource SubtitleTextBlockStyle}" />
                     <ItemsControl ItemsSource="{x:Bind ViewModel.Sessions, Mode=OneWay}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="ipc:SessionInfo">
                                 <components:SessionCard Session="{x:Bind}"
-                                                       ActionClicked="OnDisconnectClick" />
+                                                        ActionClicked="OnDisconnectClick" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
 
-                <!-- Known peers -->
-                <StackPanel Spacing="8" Visibility="{x:Bind ViewModel.HasPeers, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                <!-- Section: Known peers -->
+                <StackPanel Spacing="8"
+                            Visibility="{x:Bind ViewModel.HasPeers, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                     <TextBlock Text="Known peers" Style="{StaticResource SubtitleTextBlockStyle}" />
                     <ItemsControl ItemsSource="{x:Bind ViewModel.Peers, Mode=OneWay}">
                         <ItemsControl.ItemTemplate>
@@ -75,35 +101,26 @@
                     </ItemsControl>
                 </StackPanel>
 
-                <!-- Layout -->
-                <StackPanel Spacing="8" Visibility="{x:Bind ViewModel.HasPlacements, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock Text="Layout" Style="{StaticResource SubtitleTextBlockStyle}" />
-                    <ItemsControl ItemsSource="{x:Bind ViewModel.Placements, Mode=OneWay}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="ipc:LayoutInfo">
-                                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,4">
-                                    <TextBlock Text="{x:Bind Host}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                    <TextBlock Text="sits past your" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Text="{x:Bind Edge}" />
-                                    <TextBlock Text="edge" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <TextBox x:Name="LayoutHostInput" PlaceholderText="host" Width="200" />
-                        <ComboBox x:Name="EdgeCombo" PlaceholderText="edge" SelectedIndex="0">
-                            <ComboBoxItem Content="left" />
-                            <ComboBoxItem Content="right" />
-                            <ComboBoxItem Content="top" />
-                            <ComboBoxItem Content="bottom" />
-                        </ComboBox>
-                        <Button Content="Place" Click="OnSetLayoutClick" />
-                    </StackPanel>
+                <!-- Section: Screen layout — one picker per peer, applied at once. -->
+                <StackPanel Spacing="8"
+                            Visibility="{x:Bind ViewModel.HasPlacements, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="Screen layout" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="8" Padding="12">
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.Placements, Mode=OneWay}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="ipc:LayoutInfo">
+                                    <components:LayoutRow Placement="{x:Bind}"
+                                                          Margin="0,0,0,8"
+                                                          EdgeChanged="OnLayoutEdgeChanged" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
                 </StackPanel>
 
             </StackPanel>
-
-        </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+    </Grid>
 </UserControl>

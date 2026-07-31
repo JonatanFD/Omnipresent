@@ -35,7 +35,9 @@ Muestra información de una sesión activa con botón de acción.
 ```
 
 ### PendingRequestCard
-Muestra una solicitud entrante con botones Accept/Reject.
+Muestra una solicitud entrante con botones Accept/Reject **debajo** del
+fingerprint, que es el dato que el usuario verifica antes de aceptar (mismo
+orden que la fila de macOS).
 
 **Propiedades:**
 - `Request: PendingInfo` - Datos de la solicitud
@@ -49,6 +51,41 @@ Muestra una solicitud entrante con botones Accept/Reject.
 <components:PendingRequestCard Request="{x:Bind MyRequest}"
                                AcceptClicked="OnAcceptClick"
                                RejectClicked="OnRejectClick" />
+```
+
+### LabeledRow
+Una fila "etiqueta — valor", equivalente a `LabeledContent` de SwiftUI. Mantiene
+todas las filas de información del app con la misma disposición: etiqueta a la
+izquierda, valor a la derecha.
+
+**Propiedades:**
+- `Label: string` - Etiqueta
+- `Value: string` - Valor
+- `Monospaced: bool` - Valor en monoespaciada (para fingerprints)
+- `Selectable: bool` - Permite seleccionar el valor para copiarlo
+
+**Uso:**
+```xaml
+<components:LabeledRow Label="Fingerprint"
+                       Value="{x:Bind ViewModel.Fingerprint, Mode=OneWay}"
+                       Monospaced="True" Selectable="True" />
+```
+
+### LayoutRow
+El placement de un peer: host y un selector de borde. Elegir un borde lo aplica
+de inmediato — igual que el `Picker` de macOS, sin campo de host ni botón de
+confirmar aparte.
+
+**Propiedades:**
+- `Placement: LayoutInfo` - Host y borde actual
+- `SelectedEdge: string?` - El borde elegido, en minúsculas como lo espera el daemon
+
+**Eventos:**
+- `EdgeChanged` - Cuando el usuario elige otro borde
+
+**Uso:**
+```xaml
+<components:LayoutRow Placement="{x:Bind}" EdgeChanged="OnLayoutEdgeChanged" />
 ```
 
 ## 🎨 Estructura visual
@@ -174,9 +211,17 @@ xmlns:components="using:Omni.App.Components"
 ```
 Components/
 ├── PeerCard.xaml/cs              (Peer - Forget)
-├── SessionCard.xaml/cs           (Session - Disconnect)
-└── PendingRequestCard.xaml/cs    (Request - Accept/Reject)
+├── SessionCard.xaml/cs           (Session - Disconnect, indicador de sesión activa)
+├── PendingRequestCard.xaml/cs    (Request - Accept/Reject)
+├── LabeledRow.xaml/cs            (etiqueta - valor)
+└── LayoutRow.xaml/cs             (host - selector de borde)
 ```
+
+Los componentes reciben sus datos por `DependencyProperty` y derivan lo que
+muestran con **function bindings** (`{x:Bind HostLabel(Peer), Mode=OneWay}`), que
+sí se reevalúan cuando la propiedad cambia — una propiedad calculada normal no lo
+haría. Cada componente se pasa a sí mismo como `sender` del evento, así el
+handler lee sus datos sin recorrer el árbol visual.
 
 ## 🎯 Beneficios de esta arquitectura
 
@@ -253,9 +298,9 @@ ConnectionsView
 
 ## 🚀 Próximos componentes candidatos
 
-1. **LayoutCard** - Para mostrar placements de layout
-2. **InfoCard** - Card genérico para información
-3. **ButtonBar** - Para agrupar acciones
+1. **ButtonBar** - Para agrupar acciones
+
+(`LayoutCard` e `InfoCard` ya existen como `LayoutRow` y `LabeledRow`.)
 
 ## 📝 Notas
 
@@ -266,9 +311,14 @@ ConnectionsView
 
 ## 🔗 Relación con macOS
 
-En macOS no usan componentes reutilizables (SwiftUI hace que sea innecesario con sus declarative bindings), pero el concepto es el mismo: reducir duplicación y mantener consistencia.
+En macOS no hacen falta componentes reutilizables (SwiftUI resuelve la
+duplicación con sus bindings declarativos), pero el objetivo es el mismo: una
+sola definición por tipo de fila.
+
+Cada componente existe para reproducir una fila concreta de `MainView.swift`. Si
+cambia el layout de esa fila en macOS, se cambia aquí el componente
+correspondiente; ver el contrato de paridad en `ARCHITECTURE.md`.
 
 ---
 
-**Status:** ✅ Phase 2 Complete  
-**Commit:** [commit hash]
+**Status:** ✅ Phase 3 — paridad de layout con macOS

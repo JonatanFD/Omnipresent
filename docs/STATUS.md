@@ -5,7 +5,122 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-06-29 (the **Windows GUI client** was reorganized into a
+_Last updated: 2026-07-30 (a **cross-platform audit** and its fixes: display
+geometry, modifier keys, local IPC, input, packaging, and the **Windows GUI**
+brought to layout parity with the macOS app.
+
+**The cursor no longer changes speed when it crosses.** A screen's size is
+reported in whatever unit its OS uses, and those units are not the same size: a
+Retina Mac calls itself 1512 wide in points, a DPI-aware Windows machine calls a
+4K panel 3840 wide in pixels. Movement was applied to the peer's screen one unit
+for one, so the cursor crawled on one machine and raced on the other. A movement
+is now rescaled to cover the same *fraction* of the screen it is on, and a
+movement that was not zero never rounds away to nothing.
+
+**A second monitor no longer hands control to a peer.** Only the primary display
+counted, so a cursor moved onto another monitor was recorded as pinned to the
+primary's edge — and the next nudge that way looked exactly like the user pushing
+past the edge, so control jumped to whichever peer sat there. Both adapters now
+report the whole desktop (Windows' virtual screen, the union of macOS's active
+displays) and translate between the OS coordinates and a 0-based desktop space at
+the boundary, so a monitor above or to the left — where Windows uses negative
+coordinates — is handled without the rest of the system knowing.
+
+Re-reading the geometry when displays change is still to do: docking or
+unplugging a monitor needs a daemon restart to be picked up.
+
+**Arm64 Windows is no longer left out.** The GUI project declared `win-arm64`
+but the release only ever built x64, `omni update` had no triple for it, and
+`install.ps1` hard-coded x86_64 — so an Arm Windows machine got nothing, while
+Apple silicon and Intel were both covered. Both the CLI and the GUI now ship for
+x64 and arm64, and the installer picks by machine. The macOS app's deployment
+target dropped from 26.5 to 14.0, which is what its APIs actually need
+(`@Observable`, `ContentUnavailableView`) rather than the version it happened to
+be created on.
+
+**Command and Control can be swapped per peer.** Copy is Command-C on a Mac and
+Control-C everywhere else, and each machine faithfully sends the key it was
+given — so a Mac driving a PC sent Windows-C and a PC driving a Mac sent
+Control-C, neither of which copies. Nothing in the protocol says what a peer runs
+on, and plenty of people want the keys left alone, so this is a per-host choice:
+`omni modifiers <host> meta-control`. The controller relabels events on the way
+out (both the key code and the modifier set carried with it, or the two would
+disagree), so the target injects what it receives and needs to know nothing. Off
+by default.
+
+**A shutdown deadlock, found while verifying the rest.** After `omni stop` the
+daemon logged "shutting down" and then never finished exiting: a subscription
+task sat reading from a client that was itself waiting for the daemon to close
+the connection, so neither moved. Any client that stays subscribed hits it —
+which is exactly what both native GUIs do — leaving `omni stop` reporting
+success while the daemon kept its socket and a later `omni start` said it was
+already running. Subscriptions now watch a shutdown signal and end on their own.
+The daemon integration test used to hang forever on Windows because of it; it
+now finishes in a third of a second.
+
+**Owner-only IPC on Windows.** The Unix socket is created `0600`, but the named
+pipe was created with the system default security — weaker than the promise that
+only the owner can command the daemon. It now carries a protected DACL with a
+single entry for the SID of the user the daemon runs as. The CLI also retries a
+*busy* pipe for a moment instead of reporting "the daemon is not running": the
+daemon arms the next instance only after a client takes the current one, so two
+clients arriving together could briefly collide and get a misleading answer.
+
+**`omni start` now really detaches on Windows.** The daemon inherited its
+parent's console, and Windows sends the console-close event to every process
+attached, so closing the terminal killed the daemon — the opposite of what the
+command promises. It gets its own process group and no console.
+
+The TLS private key is now locked down *before* its bytes are written on both
+platforms, rather than written and then tightened.
+
+**Input, both directions.** A wheel notch now means the same amount of scrolling
+whichever way a session runs: the unit lives in the shared vocabulary as
+`PIXELS_PER_WHEEL_NOTCH` instead of Windows and Linux each picking their own
+number with nothing tying it to what macOS reports. **Keypad Enter** survives the
+trip — Windows puts it on `VK_RETURN` and separates it with the extended bit,
+which capture ignored and injection had no entry for, so it used to vanish
+entirely. **Caps Lock** is treated as the latch it is: its state comes from the
+macOS event flags rather than being inferred from presses, and a change sends a
+tap so the other machine flips its own latch (it used to arrive as two taps and
+leave the other side stuck on). Injecting Caps Lock *into* macOS still does
+nothing — only IOKit HID can move that latch — which is now documented in the
+adapter rather than left to be discovered.
+
+**Windows injection and capture robustness.** The Windows sink ignored the
+`modifiers` each key event carries and relied on the OS state built from received
+key-downs; since input rides unreliable datagrams, one lost packet produced the
+wrong chord or left a modifier stuck down for good. It now compares what it has
+injected against what the controller had held and makes up the difference before
+pressing the key — the self-correcting behaviour macOS already had from stamping
+flags on every event. And because Windows silently removes a low-level hook whose
+callback overran `LowLevelHooksTimeout` without telling anyone (capture stops,
+`poll` still answers "nothing right now", and `omni status` goes on claiming
+capture is running), the hook thread now re-arms both hooks on a timer and gives
+up the event channel if that fails, so the daemon stops advertising capture that
+is not happening. macOS handles the same situation through its explicit
+`TapDisabledByTimeout` event.
+
+**The Windows GUI** was brought to layout parity with the macOS app, and three
+client defects fixed along the way. The panes now match
+`MainView.swift` section for section: no title bar of its own, the daemon's state
+as a dot on the General navigation entry, a badge with the waiting-request count
+on Connections, the section name as the detail header, the same section order and
+labels in every pane, one edge picker per peer that applies immediately (the host
+field and "Place" button are gone), and a centred "Daemon Not Running" pane when
+there is no daemon and nothing remembered. Two new components — `LabeledRow` and
+`LayoutRow` — carry the row layouts, and the parity contract is written down in
+`clients/omni-windows/ARCHITECTURE.md`. The defects: the app looked for
+`omni.exe` only under `C:\Program Files\Omnipresent` and `~/.cargo/bin`, so
+`Start daemon` and `Update` failed for everyone who installed with the documented
+`install.ps1` (which writes to `%LOCALAPPDATA%\Programs\omni`) — a new
+`OmniBinaryLocator` checks `OMNI_INSTALL_DIR`, the installer's default, a
+machine-wide install, a cargo install, and finally `PATH`; the run loop caught
+only `OmniDaemonException`, so an unexpected error (a decode failure from an
+event a newer daemon added — which the IPC contract calls backward-compatible)
+escaped and froze the window on stale state forever; and `ReconnectNow` was an
+empty method, so the UI sat out the reconnect delay after starting the daemon.
+Earlier: the **Windows GUI client** was reorganized into a
 modular architecture matching the macOS app, and shipped — with a Windows
 uninstall fix — as **v0.5.0**. The monolithic main window split into four views
 (status, connections, peers, settings) behind a `NavigationView` + `Frame`, and
@@ -227,12 +342,14 @@ and `cargo test` (98 tests), including on Windows.
 
 ### What `omni-runtime` provides
 
-- **Paths & config** (`config`): everything lives in one directory
-  (`~/.config/omnipresent` on Linux, `~/Library/Application Support/omnipresent`
-  on macOS, `%APPDATA%\omnipresent` on Windows): `config.json` (UDP port,
-  default 4733; optional screen-size override; per-host edge placements),
+- **Paths & config** (`config`): everything lives in one directory named `omni`
+  (`~/.config/omni` on Linux, `~/Library/Application Support/omni` on macOS,
+  `%APPDATA%\omni` on Windows — the platform config directory, overridable with
+  `OMNI_CONFIG_DIR`): `config.json` (UDP port, default 4733; optional
+  screen-size override; per-host edge placements; per-host modifier swaps),
   certificate + key, `trust.json`, the IPC socket (or named pipe on Windows),
-  and the log.
+  and the log. Both native clients reproduce this derivation, so the names here
+  are part of the contract rather than an implementation detail.
 - **Identity** (`identity`): generates a self-signed certificate on first run
   (via `rcgen`), persists it with `0600` permissions, reloads it afterwards —
   so the machine's fingerprint is stable across restarts.
@@ -321,6 +438,19 @@ against ports using in-memory adapters.
 
 Everything below is known, deliberate, and ordered roughly by importance:
 
+- **Display changes need a restart.** The desktop's geometry is read once at
+  startup and the size is announced to a peer only when the session is
+  established. Docking, unplugging a monitor, or changing the scaling therefore
+  leaves the virtual desktop describing a screen that no longer exists until the
+  daemon is restarted. Fixing it means re-reading the bounds when the OS says
+  they changed (`WM_DISPLAYCHANGE`, `NSApplication.didChangeScreenParameters`)
+  and telling live peers, which needs one additive control message.
+- **Caps Lock cannot be injected into macOS.** Capture works in both directions,
+  but `CGEventPost` cannot move the Caps Lock latch — only IOKit HID can — so a
+  remote machine's Caps Lock has no effect on a Mac being controlled.
+- **The GUIs do not expose `doctor` or the modifier swap.** `omni modifiers` and
+  the permission checks are CLI-only. Both are worth surfacing, in both clients
+  at once so the layout parity holds.
 - **Automatic reconnection.** `omni connect` between two real machines
   (Windows ↔ macOS) is validated and works, including clipboard. What is missing
   is recovery from a *dropped* link: when the connection fails (network blip,

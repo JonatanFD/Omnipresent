@@ -26,19 +26,21 @@ use std::thread::JoinHandle;
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_INJECTED,
-    LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW, SetCursorPos, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WHEEL_DELTA, WM_KEYDOWN,
-    WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WM_XBUTTONDOWN, WM_XBUTTONUP, XBUTTON1,
+    CallNextHookEx, DispatchMessageW, GetMessageW, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, KillTimer,
+    LLKHF_EXTENDED, LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW,
+    SetCursorPos, SetTimer, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WHEEL_DELTA, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT,
+    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN,
+    WM_XBUTTONUP, XBUTTON1,
 };
 
 use super::{PIXELS_PER_WHEEL_CLICK, screen_center};
 
-/// How many protocol "pixels" one wheel notch carries (mirrors the Linux
-/// adapter so scrolling feels the same across platforms).
-const PIXELS_PER_NOTCH: i32 = PIXELS_PER_WHEEL_CLICK;
+/// How often the low-level hooks are torn down and reinstalled, to recover from
+/// Windows silently removing one. Short enough that a user notices at most a
+/// moment of dead input, long enough to cost nothing.
+const HOOK_REARM_INTERVAL_MS: u32 = 5_000;
 
 // Held-modifier bit positions, matching the `Modifiers` constants.
 const MOD_SHIFT: u8 = 1 << 0;
@@ -164,30 +166,34 @@ impl Drop for WindowsSource {
 
 /// The body of the hook thread: install both hooks, publish readiness and this
 /// thread's id, then pump messages until asked to quit.
+///
+/// A timer re-arms the hooks periodically. Windows silently removes a low-level
+/// hook whose callback took longer than `LowLevelHooksTimeout` and never says so:
+/// the callbacks simply stop being called, `poll` keeps answering "nothing right
+/// now", and `omni status` goes on claiming capture is running. Re-installing on
+/// a timer bounds how long that can last, and if re-installing fails the thread
+/// drops the event channel so `poll` reports the capture as stopped instead of
+/// looking idle. (macOS gets an explicit `TapDisabledByTimeout` event and
+/// re-enables the tap from the callback.)
 fn run_hooks(
     ready: mpsc::Sender<Result<(), WindowsInputError>>,
     thread_id_out: std::sync::Arc<AtomicU32>,
 ) {
     unsafe {
-        let module = GetModuleHandleW(std::ptr::null());
-        let keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0);
-        let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), module, 0);
-        if keyboard.is_null() || mouse.is_null() {
-            if !keyboard.is_null() {
-                UnhookWindowsHookEx(keyboard);
-            }
-            if !mouse.is_null() {
-                UnhookWindowsHookEx(mouse);
-            }
+        let Some(mut hooks) = Hooks::install() else {
             let _ = ready.send(Err(WindowsInputError::HookInstall));
             return;
-        }
+        };
 
         thread_id_out.store(
             windows_sys::Win32::System::Threading::GetCurrentThreadId(),
             Ordering::Release,
         );
         let _ = ready.send(Ok(()));
+
+        // A thread timer: with no window it posts WM_TIMER straight to this
+        // thread's queue, which the loop below picks up.
+        let timer = SetTimer(std::ptr::null_mut(), 0, HOOK_REARM_INTERVAL_MS, None);
 
         let mut msg = MSG {
             hwnd: std::ptr::null_mut(),
@@ -199,12 +205,82 @@ fn run_hooks(
         };
         // GetMessageW returns 0 on WM_QUIT (posted by Drop), -1 on error.
         while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+            if msg.message == WM_TIMER {
+                if hooks.rearm() {
+                    continue;
+                }
+                // Capture is over and cannot be recovered. Dropping the sender
+                // makes the next `poll` report it, so the daemon stops
+                // advertising a capture that is not happening.
+                *EVENT_TX.lock().expect("event channel lock") = None;
+                break;
+            }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
 
-        UnhookWindowsHookEx(keyboard);
-        UnhookWindowsHookEx(mouse);
+        if timer != 0 {
+            KillTimer(std::ptr::null_mut(), timer);
+        }
+        hooks.remove();
+    }
+}
+
+/// The pair of installed low-level hooks, so installing and removing them both
+/// happens in one place.
+struct Hooks {
+    keyboard: HHOOK,
+    mouse: HHOOK,
+}
+
+impl Hooks {
+    /// Installs both hooks, or `None` if either could not be installed (in which
+    /// case neither is left behind).
+    unsafe fn install() -> Option<Self> {
+        unsafe {
+            let module = GetModuleHandleW(std::ptr::null());
+            let keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0);
+            let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), module, 0);
+            if keyboard.is_null() || mouse.is_null() {
+                if !keyboard.is_null() {
+                    UnhookWindowsHookEx(keyboard);
+                }
+                if !mouse.is_null() {
+                    UnhookWindowsHookEx(mouse);
+                }
+                return None;
+            }
+            Some(Self { keyboard, mouse })
+        }
+    }
+
+    /// Removes and reinstalls both hooks. Returns whether capture is still in
+    /// place afterwards; on failure the hooks are gone and the caller must give
+    /// up.
+    unsafe fn rearm(&mut self) -> bool {
+        unsafe {
+            self.remove();
+            match Self::install() {
+                Some(fresh) => {
+                    *self = fresh;
+                    true
+                }
+                None => false,
+            }
+        }
+    }
+
+    unsafe fn remove(&mut self) {
+        unsafe {
+            if !self.keyboard.is_null() {
+                UnhookWindowsHookEx(self.keyboard);
+                self.keyboard = std::ptr::null_mut();
+            }
+            if !self.mouse.is_null() {
+                UnhookWindowsHookEx(self.mouse);
+                self.mouse = std::ptr::null_mut();
+            }
+        }
     }
 }
 
@@ -270,7 +346,9 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                 Action::Release => MODIFIERS.fetch_and(!bit, Ordering::Relaxed),
             };
         }
-        if let Some(hid) = keymap::hid_from_vk(vk as u16) {
+        // The extended bit is what tells the keypad's Enter from the main one.
+        let extended = info.flags & LLKHF_EXTENDED != 0;
+        if let Some(hid) = keymap::hid_from_vk(vk as u16, extended) {
             emit(InputEvent::Key {
                 code: hid,
                 action,
@@ -340,7 +418,7 @@ fn convert_mouse(message: u32, info: &MSLLHOOKSTRUCT) {
             if notches != 0 {
                 emit(InputEvent::Scroll(ScrollDelta::new(
                     0,
-                    notches * PIXELS_PER_NOTCH,
+                    notches * PIXELS_PER_WHEEL_CLICK,
                 )));
             }
         }
@@ -348,7 +426,7 @@ fn convert_mouse(message: u32, info: &MSLLHOOKSTRUCT) {
             let notches = wheel_delta(info);
             if notches != 0 {
                 emit(InputEvent::Scroll(ScrollDelta::new(
-                    notches * PIXELS_PER_NOTCH,
+                    notches * PIXELS_PER_WHEEL_CLICK,
                     0,
                 )));
             }

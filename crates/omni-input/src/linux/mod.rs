@@ -24,9 +24,10 @@ use std::sync::mpsc;
 /// any device with this name so we never re-capture our own injections.
 const VIRTUAL_DEVICE_NAME: &str = "omnipresent-virtual-input";
 
-/// How many scroll "pixels" one wheel click carries, aligning evdev's
-/// line-based wheel with the pixel-based deltas other platforms report.
-const PIXELS_PER_WHEEL_CLICK: i32 = 24;
+/// How many protocol scroll pixels one evdev wheel click carries. Taken from the
+/// shared vocabulary so a notch here and a notch on the other machine are worth
+/// the same amount of scrolling.
+const PIXELS_PER_WHEEL_CLICK: i32 = omni_protocol::input::PIXELS_PER_WHEEL_NOTCH;
 
 /// Why a Linux input operation failed.
 #[derive(Debug)]
@@ -622,6 +623,13 @@ pub fn diagnose() -> Vec<crate::diag::Check> {
 /// adapter must do here; the hook exists only so the Runtime can call it on
 /// every platform. (See the Windows adapter, where it declares DPI awareness.)
 pub fn prepare_process() {}
+
+/// The desktop's extent is not discoverable from evdev (it belongs to the
+/// display server); the Runtime falls back to configuration. Kept so all three
+/// adapters offer the same surface.
+pub fn desktop_bounds() -> Option<crate::port::DesktopBounds> {
+    None
+}
 
 /// The screen size is not discoverable from evdev (it belongs to the display
 /// server); the Runtime falls back to configuration.

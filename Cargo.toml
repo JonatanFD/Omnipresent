@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/JonatanFD/omnipresent"
@@ -61,6 +61,10 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_UI_HiDpi",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
+    # The named pipe's owner-only DACL: the token's user SID, and the SDDL
+    # helpers that turn it into a security descriptor.
+    "Win32_Security",
+    "Win32_Security_Authorization",
 ] }
 
 

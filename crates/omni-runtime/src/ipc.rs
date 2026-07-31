@@ -1,5 +1,7 @@
-//! The local IPC surface between the `omni` CLI and the daemon: JSON lines
-//! over a Unix domain socket in the config directory.
+//! The local IPC surface between the `omni` CLI and the daemon: JSON lines over
+//! the platform's local-IPC channel — a Unix-domain socket, or a named pipe on
+//! Windows. See [`crate::ipc_transport`] for the channel itself; this module is
+//! only what travels over it.
 
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +48,13 @@ pub enum Request {
     /// Turn opt-in clipboard sharing on or off at runtime. The choice is
     /// persisted to the config so it survives a daemon restart.
     Clipboard { enabled: bool },
+    /// Inspect or change how modifier keys are relabelled for a peer. With
+    /// `host` and `swap` set, apply that swap to the host; with both `None`,
+    /// list what is configured.
+    Modifiers {
+        host: Option<String>,
+        swap: Option<String>,
+    },
 }
 
 /// The daemon's answer.
@@ -68,6 +77,20 @@ pub enum Response {
     Layout {
         placements: Vec<LayoutInfo>,
     },
+    Modifiers {
+        swaps: Vec<ModifierInfo>,
+    },
+}
+
+/// How one peer's modifier keys are relabelled, as `omni modifiers` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModifierInfo {
+    pub host: String,
+    /// The swap in force: "none" or "meta-control".
+    pub swap: String,
+    /// Whether this is from a live session (`true`) or only saved in the config
+    /// for the next time the peer connects (`false`).
+    pub connected: bool,
 }
 
 /// A pushed update sent on a [`Request::Subscribe`] connection. Each event is one

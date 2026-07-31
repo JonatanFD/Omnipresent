@@ -13,6 +13,6 @@ pub mod geometry;
 pub mod layout;
 pub mod store;
 
-pub use geometry::{Edge, Point, Screen};
+pub use geometry::{Edge, Point, Screen, scale_delta};
 pub use layout::{Advance, Crossing, CursorState, LayoutError, Machine, VirtualLayout};
 pub use store::{InMemoryLayoutStore, LayoutStore, NoLayoutStored};

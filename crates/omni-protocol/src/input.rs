@@ -44,6 +44,18 @@ pub enum Action {
 pub struct KeyCode(u32);
 
 impl KeyCode {
+    /// Return on the main key block.
+    pub const RETURN: KeyCode = KeyCode(0x28);
+
+    /// Caps Lock. Unlike the other modifiers this one *latches*: pressing it
+    /// changes a state that stays until it is pressed again, so adapters treat it
+    /// as a tap rather than something held.
+    pub const CAPS_LOCK: KeyCode = KeyCode(0x39);
+
+    /// Enter on the numeric keypad, which HID reports separately from
+    /// [`KeyCode::RETURN`]. Some applications tell the two apart.
+    pub const KEYPAD_ENTER: KeyCode = KeyCode(0x58);
+
     /// Wraps a raw HID usage code.
     pub const fn new(code: u32) -> Self {
         Self(code)
@@ -52,6 +64,26 @@ impl KeyCode {
     /// The underlying code.
     pub const fn value(self) -> u32 {
         self.0
+    }
+
+    /// Which modifier this key controls, or `None` if it is an ordinary key.
+    ///
+    /// HID gives the eight modifier keys the usages `0xE0`–`0xE7`, left hand
+    /// then right. Both sides of a pair control the same modifier, so Right
+    /// Shift and Left Shift both report [`Modifiers::SHIFT`].
+    pub const fn modifier(self) -> Option<Modifiers> {
+        match self.0 {
+            0xE0 | 0xE4 => Some(Modifiers::CONTROL),
+            0xE1 | 0xE5 => Some(Modifiers::SHIFT),
+            0xE2 | 0xE6 => Some(Modifiers::ALT),
+            0xE3 | 0xE7 => Some(Modifiers::META),
+            _ => None,
+        }
+    }
+
+    /// Whether this key is one of the eight modifier keys.
+    pub const fn is_modifier(self) -> bool {
+        self.modifier().is_some()
     }
 }
 
@@ -82,6 +114,29 @@ impl Modifiers {
     pub const fn with(self, other: Modifiers) -> Self {
         Modifiers(self.0 | other.0)
     }
+
+    /// Removes the modifiers in `other` from this set.
+    pub const fn without(self, other: Modifiers) -> Self {
+        Modifiers(self.0 & !other.0)
+    }
+
+    /// The modifiers in this set but not in `other` — what is missing over there.
+    pub const fn difference(self, other: Modifiers) -> Self {
+        Modifiers(self.0 & !other.0)
+    }
+
+    /// Whether no modifier at all is set.
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// The four modifiers, each on its own, for walking a set one at a time.
+    pub const ALL: [Modifiers; 4] = [
+        Modifiers::SHIFT,
+        Modifiers::CONTROL,
+        Modifiers::ALT,
+        Modifiers::META,
+    ];
 }
 
 /// The mouse buttons we distinguish. `Other` carries any extra button by its
@@ -111,7 +166,7 @@ impl MouseDelta {
 }
 
 /// Scroll wheel movement. `dx` is horizontal, `dy` vertical; positive `dy` is a
-/// scroll up.
+/// scroll up. The unit is scroll pixels — see [`PIXELS_PER_WHEEL_NOTCH`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ScrollDelta {
     pub dx: i32,
@@ -123,6 +178,26 @@ impl ScrollDelta {
         Self { dx, dy }
     }
 }
+
+/// How many [`ScrollDelta`] units one notch of a mouse wheel is worth.
+///
+/// A `ScrollDelta` is measured in scroll pixels, because that is the finest
+/// thing any platform reports: macOS hands out continuous pixel deltas (a
+/// trackpad produces many small ones), while Windows and Linux report whole
+/// wheel notches. The notched platforms multiply by this constant on the way out
+/// and divide on the way in, keeping the remainder so nothing is lost.
+///
+/// It lives here, in the shared vocabulary, because it defines what a unit on
+/// the wire *means*. With each platform picking its own number, one notch on a
+/// Mac and one notch on a PC scrolled visibly different amounts. The value is
+/// matched to the delta macOS reports for a single notch, so a notch is a notch
+/// in every direction; the notched platforms only have to agree with each other,
+/// so they stay consistent whatever it is set to.
+pub const PIXELS_PER_WHEEL_NOTCH: i32 = 10;
+
+// A zero or negative notch would make the notched platforms drop every scroll,
+// or scroll backwards. Checked here so it can never be set to one.
+const _: () = assert!(PIXELS_PER_WHEEL_NOTCH > 0);
 
 #[cfg(test)]
 mod tests {
@@ -159,5 +234,49 @@ mod tests {
     fn deltas_carry_their_components() {
         assert_eq!(MouseDelta::new(-3, 5), MouseDelta { dx: -3, dy: 5 });
         assert_eq!(ScrollDelta::new(0, -1), ScrollDelta { dx: 0, dy: -1 });
+    }
+
+    #[test]
+    fn both_sides_of_a_modifier_pair_control_the_same_modifier() {
+        // Left and right Shift are different keys but one modifier.
+        assert_eq!(KeyCode::new(0xE1).modifier(), Some(Modifiers::SHIFT));
+        assert_eq!(KeyCode::new(0xE5).modifier(), Some(Modifiers::SHIFT));
+        assert_eq!(KeyCode::new(0xE0).modifier(), Some(Modifiers::CONTROL));
+        assert_eq!(KeyCode::new(0xE4).modifier(), Some(Modifiers::CONTROL));
+        assert_eq!(KeyCode::new(0xE2).modifier(), Some(Modifiers::ALT));
+        assert_eq!(KeyCode::new(0xE6).modifier(), Some(Modifiers::ALT));
+        assert_eq!(KeyCode::new(0xE3).modifier(), Some(Modifiers::META));
+        assert_eq!(KeyCode::new(0xE7).modifier(), Some(Modifiers::META));
+    }
+
+    #[test]
+    fn an_ordinary_key_controls_no_modifier() {
+        assert_eq!(KeyCode::new(0x04).modifier(), None); // A
+        assert!(!KeyCode::new(0x04).is_modifier());
+        assert!(KeyCode::new(0xE1).is_modifier());
+        // Caps Lock latches a state; it is not one of the eight modifier keys.
+        assert!(!KeyCode::CAPS_LOCK.is_modifier());
+    }
+
+    #[test]
+    fn modifier_sets_can_be_narrowed_and_compared() {
+        let both = Modifiers::SHIFT.with(Modifiers::CONTROL);
+
+        assert_eq!(both.without(Modifiers::SHIFT), Modifiers::CONTROL);
+        assert_eq!(both.difference(Modifiers::SHIFT), Modifiers::CONTROL);
+        assert!(Modifiers::NONE.is_empty());
+        assert!(!both.is_empty());
+        assert_eq!(Modifiers::ALL.len(), 4);
+    }
+
+    #[test]
+    fn the_named_keys_are_their_hid_usages() {
+        // Adapters on both sides of a session key off these, so the numbers are
+        // part of the contract, not an implementation detail.
+        assert_eq!(KeyCode::RETURN.value(), 0x28);
+        assert_eq!(KeyCode::CAPS_LOCK.value(), 0x39);
+        assert_eq!(KeyCode::KEYPAD_ENTER.value(), 0x58);
+        // Keypad Enter is a different key from Return.
+        assert_ne!(KeyCode::RETURN, KeyCode::KEYPAD_ENTER);
     }
 }

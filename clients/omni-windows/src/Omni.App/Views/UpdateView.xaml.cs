@@ -1,10 +1,14 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Omni.App.Core;
-using System.Diagnostics;
 
 namespace Omni.App.Views;
 
+/// <summary>
+/// The Update pane: the installed version, and a button that runs
+/// <c>omni update</c>. Mirrors the macOS Update pane, including swapping the
+/// button's label for a spinner while the update runs.
+/// </summary>
 public sealed partial class UpdateView : UserControl
 {
     public DaemonViewModel ViewModel { get; }
@@ -17,58 +21,24 @@ public sealed partial class UpdateView : UserControl
 
     private async void OnUpdateClick(object sender, RoutedEventArgs e)
     {
-        UpdateButton.IsEnabled = false;
-        UpdateProgress.IsActive = true;
+        SetUpdating(true);
         UpdateMessage.Visibility = Visibility.Collapsed;
 
-        var message = await RunUpdateAsync();
+        // Finding and running the CLI lives in the view model, so this pane and
+        // the Start button agree on where the binary is.
+        var message = await ViewModel.RunUpdateAsync();
 
         UpdateMessage.Text = message;
         UpdateMessage.Visibility = Visibility.Visible;
-        UpdateProgress.IsActive = false;
-        UpdateButton.IsEnabled = true;
+        SetUpdating(false);
     }
 
-    private Task<string> RunUpdateAsync()
+    /// <summary>Shows progress in place of the label while the update runs.</summary>
+    private void SetUpdating(bool updating)
     {
-        return Task.Run(() =>
-        {
-            var candidates = new[]
-            {
-                @"C:\Program Files\Omnipresent\omni.exe",
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cargo", "bin", "omni.exe"),
-            };
-
-            var binaryPath = candidates.FirstOrDefault(p => File.Exists(p));
-            if (binaryPath is null)
-            {
-                return "Could not find the omni binary. Make sure Omnipresent is installed.";
-            }
-
-            try
-            {
-                var process = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = binaryPath,
-                        Arguments = "update",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                    }
-                };
-
-                process.Start();
-                process.WaitForExit();
-
-                return process.ExitCode == 0
-                    ? "Update complete. The daemon will restart shortly."
-                    : $"Update exited with code {process.ExitCode}.";
-            }
-            catch (Exception ex)
-            {
-                return $"Failed to run update: {ex.Message}";
-            }
-        });
+        UpdateButton.IsEnabled = !updating;
+        UpdateProgress.IsActive = updating;
+        UpdateProgress.Visibility = updating ? Visibility.Visible : Visibility.Collapsed;
+        UpdateButtonLabel.Text = updating ? "Updating…" : "Update Omnipresent";
     }
 }

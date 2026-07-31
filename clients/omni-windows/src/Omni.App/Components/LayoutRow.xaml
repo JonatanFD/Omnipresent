@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Omni.App.Components.LayoutRow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Host on the left, edge picker on the right. Choosing an edge applies it
+         at once — the same immediate Picker behaviour as the macOS pane, with no
+         separate host field or confirm button. -->
+    <Grid ColumnSpacing="16" MinHeight="32">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <TextBlock Grid.Column="0"
+                   Text="{x:Bind HostLabel(Placement), Mode=OneWay}"
+                   VerticalAlignment="Center"
+                   TextWrapping="NoWrap"
+                   TextTrimming="CharacterEllipsis" />
+
+        <ComboBox Grid.Column="1"
+                  x:Name="EdgePicker"
+                  MinWidth="120"
+                  VerticalAlignment="Center"
+                  SelectedIndex="{x:Bind SelectedEdgeIndex(Placement), Mode=OneWay}"
+                  SelectionChanged="OnEdgeSelectionChanged">
+            <x:String>Left</x:String>
+            <x:String>Right</x:String>
+            <x:String>Top</x:String>
+            <x:String>Bottom</x:String>
+        </ComboBox>
+    </Grid>
+</UserControl>

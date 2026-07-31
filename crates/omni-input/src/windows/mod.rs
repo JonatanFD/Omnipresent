@@ -23,19 +23,22 @@ pub use source::WindowsSource;
 pub type OsSource = WindowsSource;
 pub type OsSink = WindowsSink;
 
+use crate::port::DesktopBounds;
 use windows_sys::Win32::Foundation::POINT;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN, SetWindowsHookExW,
+    CallNextHookEx, GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SetWindowsHookExW,
     UnhookWindowsHookEx, WH_MOUSE_LL,
 };
 
-/// How many protocol "pixels" one wheel notch carries, aligning Windows wheel
-/// notches with the pixel-based scroll deltas the other platforms report.
-pub(crate) const PIXELS_PER_WHEEL_CLICK: i32 = 24;
+/// How many protocol scroll pixels one Windows wheel notch carries. Taken from
+/// the shared vocabulary so a notch here and a notch on the other machine are
+/// worth the same amount of scrolling.
+pub(crate) const PIXELS_PER_WHEEL_CLICK: i32 = omni_protocol::input::PIXELS_PER_WHEEL_NOTCH;
 
 /// Why a Windows input operation failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,33 +153,55 @@ pub fn prepare_process() {
     }
 }
 
-/// The size of the primary display in pixels — the geometry Topology builds the
-/// virtual desktop from.
-pub fn primary_screen_size() -> Option<(u32, u32)> {
+/// Everything the desktop covers, across every monitor, in pixels.
+///
+/// The *virtual* screen rather than the primary one: the cursor moves over every
+/// monitor, and pretending only the primary exists made a cursor on a second
+/// monitor look as though it were jammed against the primary's edge — which the
+/// crossing logic then read as the user pushing through to a peer.
+pub fn desktop_bounds() -> Option<DesktopBounds> {
+    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+    if width > 0 && height > 0 {
+        let origin_x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+        let origin_y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+        return Some(DesktopBounds::new(
+            origin_x,
+            origin_y,
+            width as u32,
+            height as u32,
+        ));
+    }
+    // No virtual-screen metrics (they can be absent in odd sessions): fall back
+    // to the primary display, at the origin.
     let width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
     let height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
-    if width > 0 && height > 0 {
-        Some((width as u32, height as u32))
-    } else {
-        None
-    }
+    (width > 0 && height > 0).then(|| DesktopBounds::new(0, 0, width as u32, height as u32))
 }
 
-/// Where the cursor currently is, in primary-screen pixels.
+/// The size of the desktop — the geometry Topology builds the virtual desktop
+/// from.
+pub fn primary_screen_size() -> Option<(u32, u32)> {
+    desktop_bounds().map(DesktopBounds::size)
+}
+
+/// Where the cursor currently is, in desktop space (0-based, so a monitor left
+/// of the primary one does not report negative coordinates).
 pub fn cursor_position() -> Option<(i32, i32)> {
     let mut point = POINT { x: 0, y: 0 };
-    if unsafe { GetCursorPos(&mut point) } != 0 {
-        Some((point.x, point.y))
-    } else {
-        None
+    if unsafe { GetCursorPos(&mut point) } == 0 {
+        return None;
     }
+    let bounds = desktop_bounds()?;
+    Some(bounds.to_desktop(point.x, point.y))
 }
 
-/// The centre of the primary screen, where the cursor is parked to keep
-/// relative motion flowing while controlling a remote machine.
+/// The centre of the desktop, where the cursor is parked to keep relative motion
+/// flowing while controlling a remote machine. In OS coordinates, since it is
+/// handed straight to `SetCursorPos`.
 pub(crate) fn screen_center() -> (i32, i32) {
-    match primary_screen_size() {
-        Some((w, h)) => (w as i32 / 2, h as i32 / 2),
+    match desktop_bounds() {
+        Some(bounds) => bounds.to_screen(bounds.width as i32 / 2, bounds.height as i32 / 2),
         None => (0, 0),
     }
 }

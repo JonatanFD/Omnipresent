@@ -61,6 +61,14 @@ enum Command {
         #[command(subcommand)]
         action: ClipboardAction,
     },
+    /// Show how modifier keys are relabelled per peer, or change it. With no
+    /// arguments, lists them; with a host and a swap (none or meta-control),
+    /// applies it. Use meta-control between a Mac and a PC so Command and
+    /// Control shortcuts keep working.
+    Modifiers {
+        host: Option<String>,
+        swap: Option<String>,
+    },
     /// Check that the OS permissions and environment the daemon needs are in place.
     Doctor,
     /// Update omni to the latest release.
@@ -163,6 +171,7 @@ fn main() -> ExitCode {
             };
             simple(Request::Clipboard { enabled }, done)
         }
+        Command::Modifiers { host, swap } => modifiers(host, swap),
         Command::Doctor => doctor(),
         Command::Update => update::update(request),
         Command::Uninstall => uninstall(),
@@ -197,6 +206,50 @@ fn layout(host: Option<String>, edge: Option<String>) -> ExitCode {
                     for p in placements {
                         let state = if p.connected { "connected" } else { "saved" };
                         println!("{}  past the {} edge  ({state})", p.host, p.edge);
+                    }
+                }
+                ExitCode::SUCCESS
+            }
+            Ok(other) => unexpected(other),
+            Err(e) => {
+                eprintln!("omni: {e}");
+                ExitCode::FAILURE
+            }
+        },
+    }
+}
+
+/// Lists how modifiers are relabelled per peer, or sets it for one host.
+fn modifiers(host: Option<String>, swap: Option<String>) -> ExitCode {
+    match (host, swap) {
+        (Some(host), Some(swap)) => simple(
+            Request::Modifiers {
+                host: Some(host),
+                swap: Some(swap),
+            },
+            "applied",
+        ),
+        (host @ Some(_), None) => {
+            eprintln!(
+                "omni: give a swap too, e.g. `omni modifiers {} meta-control`",
+                host.unwrap()
+            );
+            ExitCode::FAILURE
+        }
+        (None, _) => match request(Request::Modifiers {
+            host: None,
+            swap: None,
+        }) {
+            Ok(Response::Modifiers { swaps }) => {
+                if swaps.is_empty() {
+                    println!("no changes — every peer gets the keys as pressed");
+                } else {
+                    for s in swaps {
+                        let state = if s.connected { "connected" } else { "saved" };
+                        match s.swap.as_str() {
+                            "none" => println!("{}  keys sent as pressed  ({state})", s.host),
+                            other => println!("{}  {other}  ({state})", s.host),
+                        }
                     }
                 }
                 ExitCode::SUCCESS
@@ -353,12 +406,14 @@ fn start() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let spawned = std::process::Command::new(exe)
+    let mut command = std::process::Command::new(exe);
+    command
         .arg("daemon")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+        .stderr(std::process::Stdio::null());
+    detach(&mut command);
+    let spawned = command.spawn();
     if let Err(e) = spawned {
         eprintln!("omni: could not start the daemon: {e}");
         return ExitCode::FAILURE;
@@ -377,6 +432,25 @@ fn start() -> ExitCode {
     eprintln!("omni: the daemon did not come up — check the log in the config directory");
     ExitCode::FAILURE
 }
+
+/// Cuts the daemon loose from the terminal that started it.
+///
+/// Windows sends a console-close event to *every* process attached to a console,
+/// so a daemon that simply inherited one shut down the moment its terminal was
+/// closed — the opposite of what `omni start` promises. Its own process group and
+/// no console at all keeps it running.
+#[cfg(windows)]
+fn detach(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+}
+
+/// Nothing to do off Windows: the daemon already survives its terminal, and its
+/// standard streams are detached above.
+#[cfg(not(windows))]
+fn detach(_command: &mut std::process::Command) {}
 
 fn uninstall() -> ExitCode {
     // Best effort: the daemon may not be running, and that is fine.

@@ -19,9 +19,6 @@ public sealed partial class PendingRequestCard : UserControl
             typeof(PendingRequestCard),
             new PropertyMetadata(null));
 
-    public string Host => Request?.Host ?? "";
-    public string Fingerprint => Request?.Fingerprint ?? "";
-
     public event RoutedEventHandler? AcceptClicked;
     public event RoutedEventHandler? RejectClicked;
 
@@ -30,13 +27,14 @@ public sealed partial class PendingRequestCard : UserControl
         InitializeComponent();
     }
 
-    private void OnAcceptClick(object sender, RoutedEventArgs e)
-    {
-        AcceptClicked?.Invoke(sender, e);
-    }
+    /// <summary>The host asking for control.</summary>
+    public string HostLabel(PendingInfo? request) => request?.Host ?? "";
 
-    private void OnRejectClick(object sender, RoutedEventArgs e)
-    {
-        RejectClicked?.Invoke(sender, e);
-    }
+    /// <summary>The fingerprint the user verifies before accepting.</summary>
+    public string FingerprintLabel(PendingInfo? request) => request?.Fingerprint ?? "";
+
+    // The card itself is the sender, so a handler can read its data directly.
+    private void OnAcceptClick(object sender, RoutedEventArgs e) => AcceptClicked?.Invoke(this, e);
+
+    private void OnRejectClick(object sender, RoutedEventArgs e) => RejectClicked?.Invoke(this, e);
 }

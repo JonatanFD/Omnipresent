@@ -67,6 +67,22 @@ omni layout <host> <edge>        # place a peer past left | right | top | bottom
 
 The placement is saved, so it also applies the next time that peer connects.
 
+## Modifier keys
+
+Copy is Command-C on a Mac and Control-C everywhere else. Both machines send the
+key they were given, so by default a Mac driving a PC sends Windows-C and a PC
+driving a Mac sends Control-C — neither of which copies. Swap the two for a peer
+so the shortcuts you know keep working:
+
+```
+omni modifiers                          # show how keys are relabelled per peer
+omni modifiers <host> meta-control      # swap Command/Windows with Control
+omni modifiers <host> none              # send the keys exactly as pressed
+```
+
+The choice is saved per host and applies the next time that peer connects. It is
+off by default, because the swap is only right for a Mac-to-PC pairing.
+
 ## Clipboard
 
 Clipboard sharing is opt-in and off by default. Toggle it at runtime (no

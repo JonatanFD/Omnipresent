@@ -4,19 +4,24 @@
 //! own access-control model, so this hides that behind one call:
 //!
 //! - **Unix**: the file is created with mode `0600` (owner read/write only).
-//! - **Windows**: the file is written, then its ACL is reset to inherit nothing
-//!   and grant only the current user — `icacls`, best effort. The state
-//!   directory already lives under the per-user profile, so this tightens an
-//!   already user-scoped location rather than being the only barrier.
+//! - **Windows**: the file is created empty, its ACL is reset to inherit nothing
+//!   and grant only the current user (`icacls`, best effort), and only then are
+//!   the bytes written. The state directory already lives under the per-user
+//!   profile, so this tightens an already user-scoped location rather than being
+//!   the only barrier.
+//!
+//! Both order the work the same way — lock the file down, then write the secret
+//! — so the key never exists on disk under looser permissions, however briefly.
 
 use std::io;
 use std::path::Path;
 
 /// Writes `bytes` to `path`, readable and writable only by the current user.
+///
+/// Each platform tightens the file *before* the secret goes in, so there is no
+/// window where the key exists with looser permissions.
 pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    write_bytes(path, bytes)?;
-    restrict_to_owner(path);
-    Ok(())
+    write_bytes(path, bytes)
 }
 
 #[cfg(unix)]
@@ -32,15 +37,20 @@ fn write_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes)
 }
 
+/// On Windows the file is created empty first and locked down before a single
+/// secret byte is written, so the key is never briefly readable under whatever
+/// permissions it would have inherited.
 #[cfg(not(unix))]
 fn write_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    std::fs::write(path, bytes)
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+    restrict_to_owner(path);
+    file.write_all(bytes)
 }
-
-/// Strips inherited permissions and grants only the current user. Unix already
-/// did this through the file mode, so this is a no-op there.
-#[cfg(unix)]
-fn restrict_to_owner(_path: &Path) {}
 
 /// On Windows, reset the file's ACL with `icacls` so it inherits nothing and
 /// only the current user has access. Best effort: a failure leaves the file
