@@ -5,8 +5,34 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-07-29 (a **cross-platform input audit** and its fixes, plus
-the **Windows GUI** brought to layout parity with the macOS app.
+_Last updated: 2026-07-30 (a **cross-platform audit** and its fixes: local IPC,
+input, and the **Windows GUI** brought to layout parity with the macOS app.
+
+**A shutdown deadlock, found while verifying the rest.** After `omni stop` the
+daemon logged "shutting down" and then never finished exiting: a subscription
+task sat reading from a client that was itself waiting for the daemon to close
+the connection, so neither moved. Any client that stays subscribed hits it —
+which is exactly what both native GUIs do — leaving `omni stop` reporting
+success while the daemon kept its socket and a later `omni start` said it was
+already running. Subscriptions now watch a shutdown signal and end on their own.
+The daemon integration test used to hang forever on Windows because of it; it
+now finishes in a third of a second.
+
+**Owner-only IPC on Windows.** The Unix socket is created `0600`, but the named
+pipe was created with the system default security — weaker than the promise that
+only the owner can command the daemon. It now carries a protected DACL with a
+single entry for the SID of the user the daemon runs as. The CLI also retries a
+*busy* pipe for a moment instead of reporting "the daemon is not running": the
+daemon arms the next instance only after a client takes the current one, so two
+clients arriving together could briefly collide and get a misleading answer.
+
+**`omni start` now really detaches on Windows.** The daemon inherited its
+parent's console, and Windows sends the console-close event to every process
+attached, so closing the terminal killed the daemon — the opposite of what the
+command promises. It gets its own process group and no console.
+
+The TLS private key is now locked down *before* its bytes are written on both
+platforms, rather than written and then tightened.
 
 **Input, both directions.** A wheel notch now means the same amount of scrolling
 whichever way a session runs: the unit lives in the shared vocabulary as

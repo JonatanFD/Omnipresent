@@ -61,6 +61,10 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_UI_HiDpi",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
+    # The named pipe's owner-only DACL: the token's user SID, and the SDDL
+    # helpers that turn it into a security descriptor.
+    "Win32_Security",
+    "Win32_Security_Authorization",
 ] }
 
 

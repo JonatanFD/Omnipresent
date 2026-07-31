@@ -135,6 +135,16 @@ struct Shared {
     /// counter; only "it changed" matters, and `watch` coalesces bursts.
     changes: watch::Sender<u64>,
     shutdown: tokio::sync::Notify,
+    /// Flipped once the daemon is on its way down, so long-lived tasks can end
+    /// on their own.
+    ///
+    /// A subscription would otherwise wait forever: the task blocks reading from
+    /// a client that is itself waiting for the daemon to close the connection, so
+    /// neither side moves and the process never finishes exiting. Any client that
+    /// stays subscribed — which is exactly what the native GUIs do — used to leave
+    /// `omni stop` reporting success while the daemon hung around still holding
+    /// its socket.
+    shutting_down: watch::Sender<bool>,
 }
 
 impl Shared {
@@ -254,6 +264,7 @@ pub fn run_with_paths(paths: Paths) -> Result<(), DaemonError> {
             clipboard_on: clipboard_on_tx,
             changes: changes_tx,
             shutdown: tokio::sync::Notify::new(),
+            shutting_down: watch::channel(false).0,
         });
         rebuild_layout(&mut shared.lock(), &shared);
 
@@ -318,6 +329,9 @@ pub fn run_with_paths(paths: Paths) -> Result<(), DaemonError> {
         wait_for_shutdown(&shared).await;
 
         tracing::info!("daemon shutting down");
+        // Let the subscriptions go first: each is holding a connection open for a
+        // client that will not close it until we do.
+        let _ = shared.shutting_down.send(true);
         disconnect_all(&shared);
         shared.endpoint.close();
         Ok(())
@@ -1104,6 +1118,7 @@ where
     R: tokio::io::AsyncBufRead + Unpin,
 {
     let mut changes = shared.changes.subscribe();
+    let mut shutting_down = shared.shutting_down.subscribe();
     if !write_event(write, &Event::Status(status(shared))).await {
         return;
     }
@@ -1117,6 +1132,7 @@ where
                     break; // client gone
                 }
             }
+            _ = shutting_down.changed() => break,
             line = lines.next_line() => match line {
                 // Stray input on a subscription is ignored; EOF/error means the
                 // client disconnected.
