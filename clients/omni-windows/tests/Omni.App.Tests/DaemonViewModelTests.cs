@@ -140,13 +140,15 @@ public class DaemonViewModelTests
         var vm = new DaemonViewModel(client, new ImmediateDispatcher(), TimeSpan.FromHours(1));
 
         vm.Start(CancellationToken.None);
-        await client.WaitForAttempts(1);
+        await client.WaitForHandshake();
 
+        // The loop is now parked on a one-hour reconnect delay. Without a working
+        // ReconnectNow this second handshake would never arrive.
         vm.ReconnectNow();
-        await client.WaitForAttempts(2);
+        await client.WaitForHandshake();
 
         await vm.ShutdownAsync();
-        Assert.True(client.Attempts >= 2);
+        Assert.True(client.Attempts >= 2, $"expected at least 2 handshakes, saw {client.Attempts}");
     }
 
     [Fact]
@@ -257,36 +259,28 @@ public class DaemonViewModelTests
     /// <summary>A client that counts handshakes so a restart can be observed.</summary>
     private sealed class CountingHelloClient : IOmniDaemonClient
     {
-        private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int _target = int.MaxValue;
-        private readonly Lock _gate = new();
+        /// <summary>
+        /// One permit released per handshake, so each wait consumes exactly one.
+        /// A single completion signal would not do: it stays completed, and the
+        /// second wait would sail through without a second handshake happening.
+        /// </summary>
+        private readonly SemaphoreSlim _handshakes = new(0);
 
-        public int Attempts { get; private set; }
+        private int _attempts;
+        public int Attempts => Volatile.Read(ref _attempts);
 
-        /// <summary>Completes once <paramref name="count"/> handshakes have happened.</summary>
-        public async Task WaitForAttempts(int count)
+        /// <summary>Waits for the next handshake, failing the test if none comes.</summary>
+        public async Task WaitForHandshake()
         {
-            lock (_gate)
-            {
-                _target = count;
-                if (Attempts >= count)
-                {
-                    return;
-                }
-            }
-            await _reached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(
+                await _handshakes.WaitAsync(TimeSpan.FromSeconds(5)),
+                "expected another handshake attempt");
         }
 
         public Task<HelloResponse> HelloAsync(CancellationToken cancellationToken = default)
         {
-            lock (_gate)
-            {
-                Attempts++;
-                if (Attempts >= _target)
-                {
-                    _reached.TrySetResult();
-                }
-            }
+            Interlocked.Increment(ref _attempts);
+            _handshakes.Release();
             // Fail after the handshake so the loop parks in the reconnect delay,
             // which is exactly the state ReconnectNow has to break out of.
             throw new OmniDaemonException("the omni daemon is not running");
