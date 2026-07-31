@@ -22,7 +22,7 @@ use core_graphics::event::{
 };
 use omni_protocol::InputEvent;
 use omni_protocol::input::{Action, MouseDelta, ScrollDelta};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -149,8 +149,10 @@ fn run_tap(
     // from the momentary modifiers.
     let caps_lock_on = Cell::new(false);
     // Reused so converting an event does not allocate on every keystroke. One OS
-    // event can produce two protocol events (a Caps Lock change is a tap).
-    let mut converted: Vec<InputEvent> = Vec::with_capacity(2);
+    // event can produce two protocol events (a Caps Lock change is a tap). The
+    // tap wants an `Fn`, so the buffer is borrowed through a `RefCell` like the
+    // other per-callback state above; only the tap thread ever touches it.
+    let converted: RefCell<Vec<InputEvent>> = RefCell::new(Vec::with_capacity(2));
 
     let interest = vec![
         CGEventType::KeyDown,
@@ -190,15 +192,10 @@ fn run_tap(
             {
                 return CallbackResult::Keep;
             }
-            converted.clear();
-            convert_event(
-                event_type,
-                event,
-                &held_modifiers,
-                &caps_lock_on,
-                &mut converted,
-            );
-            for event in converted.drain(..) {
+            let mut out = converted.borrow_mut();
+            out.clear();
+            convert_event(event_type, event, &held_modifiers, &caps_lock_on, &mut out);
+            for event in out.drain(..) {
                 let _ = events.send(event);
             }
             if suppressed.load(Ordering::Relaxed) {

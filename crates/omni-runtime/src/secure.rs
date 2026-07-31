@@ -52,11 +52,6 @@ fn write_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes)
 }
 
-/// Strips inherited permissions and grants only the current user. Unix already
-/// did this through the file mode, so this is a no-op there.
-#[cfg(unix)]
-fn restrict_to_owner(_path: &Path) {}
-
 /// On Windows, reset the file's ACL with `icacls` so it inherits nothing and
 /// only the current user has access. Best effort: a failure leaves the file
 /// readable per the (already per-user) parent directory, and is not fatal.
