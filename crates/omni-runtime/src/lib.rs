@@ -12,6 +12,10 @@ pub mod doctor;
 pub mod identity;
 pub mod ipc;
 pub mod ipc_transport;
+/// The named pipe's access control. Windows only: on Unix the socket's file
+/// mode does the same job.
+#[cfg(windows)]
+pub mod pipe_security;
 pub mod ratelimit;
 pub mod secure;
 pub mod trust;

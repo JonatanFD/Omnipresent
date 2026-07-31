@@ -353,12 +353,14 @@ fn start() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let spawned = std::process::Command::new(exe)
+    let mut command = std::process::Command::new(exe);
+    command
         .arg("daemon")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+        .stderr(std::process::Stdio::null());
+    detach(&mut command);
+    let spawned = command.spawn();
     if let Err(e) = spawned {
         eprintln!("omni: could not start the daemon: {e}");
         return ExitCode::FAILURE;
@@ -377,6 +379,25 @@ fn start() -> ExitCode {
     eprintln!("omni: the daemon did not come up — check the log in the config directory");
     ExitCode::FAILURE
 }
+
+/// Cuts the daemon loose from the terminal that started it.
+///
+/// Windows sends a console-close event to *every* process attached to a console,
+/// so a daemon that simply inherited one shut down the moment its terminal was
+/// closed — the opposite of what `omni start` promises. Its own process group and
+/// no console at all keeps it running.
+#[cfg(windows)]
+fn detach(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+}
+
+/// Nothing to do off Windows: the daemon already survives its terminal, and its
+/// standard streams are detached above.
+#[cfg(not(windows))]
+fn detach(_command: &mut std::process::Command) {}
 
 fn uninstall() -> ExitCode {
     // Best effort: the daemon may not be running, and that is fine.
