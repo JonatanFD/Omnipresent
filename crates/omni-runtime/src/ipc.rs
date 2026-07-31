@@ -1,5 +1,7 @@
-//! The local IPC surface between the `omni` CLI and the daemon: JSON lines
-//! over a Unix domain socket in the config directory.
+//! The local IPC surface between the `omni` CLI and the daemon: JSON lines over
+//! the platform's local-IPC channel — a Unix-domain socket, or a named pipe on
+//! Windows. See [`crate::ipc_transport`] for the channel itself; this module is
+//! only what travels over it.
 
 use serde::{Deserialize, Serialize};
 

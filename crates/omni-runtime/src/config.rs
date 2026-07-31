@@ -1,10 +1,12 @@
 //! Where the daemon keeps its state on disk, and the small user-editable
 //! configuration.
 //!
-//! Everything lives under one directory (`~/.config/omni` by platform
-//! convention, overridable with `OMNI_CONFIG_DIR` for tests and side-by-side
-//! runs): the identity key pair, the trust store, the config file, the IPC
-//! socket, and the daemon log.
+//! Everything lives under one directory named `omni` inside the platform's
+//! config directory — `~/.config/omni` on Linux, `~/Library/Application
+//! Support/omni` on macOS, `%APPDATA%\omni` on Windows — overridable with
+//! `OMNI_CONFIG_DIR` for tests and side-by-side runs. It holds the identity key
+//! pair, the trust store, the config file, the IPC socket (a named pipe on
+//! Windows), and the daemon log.
 
 use omni_protocol::ModifierSwap;
 use omni_topology::Edge;

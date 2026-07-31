@@ -7,8 +7,9 @@ name: Release
 # prebuilt binary with the one-liners in the README.
 #
 # The native Windows GUI (WinUI 3, `clients/omni-windows`) is also built
-# self-contained and attached as `omni-gui-x86_64-pc-windows-msvc.zip`, so it
-# runs on any Windows x64 box without installing .NET.
+# self-contained and attached as `omni-gui-<target>.zip`, so it runs without
+# installing .NET. Both the CLI and the GUI ship for x64 and arm64, so an Arm
+# Windows machine is not left without a build.
 on:
   push:
     tags: ["v*"]
@@ -35,6 +36,10 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+          # Arm64 Windows is cross-compiled from the x64 runner, the same way
+          # the Intel Mac build comes off the Apple-silicon one.
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
 
@@ -91,8 +96,18 @@ jobs:
             install.ps1
 
   windows-gui:
-    name: build Windows GUI (WinUI 3)
+    name: build Windows GUI (WinUI 3, ${{ matrix.rid }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            platform: x64
+            target: x86_64-pc-windows-msvc
+          - rid: win-arm64
+            platform: arm64
+            target: aarch64-pc-windows-msvc
     defaults:
       run:
         working-directory: clients/omni-windows
@@ -111,12 +126,13 @@ jobs:
       - name: Publish (self-contained)
         run: >
           dotnet publish src/Omni.App/Omni.App.csproj
-          -c Release -r win-x64 --self-contained -p:Platform=x64 -o publish
+          -c Release -r ${{ matrix.rid }} --self-contained
+          -p:Platform=${{ matrix.platform }} -o publish
 
       - name: Package
         shell: pwsh
         run: |
-          $archive = "omni-gui-x86_64-pc-windows-msvc.zip"
+          $archive = "omni-gui-${{ matrix.target }}.zip"
           Compress-Archive -Path "publish/*" -DestinationPath $archive
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
           "$hash  $archive" | Out-File "$archive.sha256" -Encoding ascii
@@ -125,5 +141,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            clients/omni-windows/omni-gui-x86_64-pc-windows-msvc.zip
-            clients/omni-windows/omni-gui-x86_64-pc-windows-msvc.zip.sha256
+            clients/omni-windows/omni-gui-${{ matrix.target }}.zip
+            clients/omni-windows/omni-gui-${{ matrix.target }}.zip.sha256
