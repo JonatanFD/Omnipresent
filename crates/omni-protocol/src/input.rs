@@ -65,6 +65,26 @@ impl KeyCode {
     pub const fn value(self) -> u32 {
         self.0
     }
+
+    /// Which modifier this key controls, or `None` if it is an ordinary key.
+    ///
+    /// HID gives the eight modifier keys the usages `0xE0`–`0xE7`, left hand
+    /// then right. Both sides of a pair control the same modifier, so Right
+    /// Shift and Left Shift both report [`Modifiers::SHIFT`].
+    pub const fn modifier(self) -> Option<Modifiers> {
+        match self.0 {
+            0xE0 | 0xE4 => Some(Modifiers::CONTROL),
+            0xE1 | 0xE5 => Some(Modifiers::SHIFT),
+            0xE2 | 0xE6 => Some(Modifiers::ALT),
+            0xE3 | 0xE7 => Some(Modifiers::META),
+            _ => None,
+        }
+    }
+
+    /// Whether this key is one of the eight modifier keys.
+    pub const fn is_modifier(self) -> bool {
+        self.modifier().is_some()
+    }
 }
 
 /// The set of modifier keys held down at the time of an event, packed into a
@@ -94,6 +114,29 @@ impl Modifiers {
     pub const fn with(self, other: Modifiers) -> Self {
         Modifiers(self.0 | other.0)
     }
+
+    /// Removes the modifiers in `other` from this set.
+    pub const fn without(self, other: Modifiers) -> Self {
+        Modifiers(self.0 & !other.0)
+    }
+
+    /// The modifiers in this set but not in `other` — what is missing over there.
+    pub const fn difference(self, other: Modifiers) -> Self {
+        Modifiers(self.0 & !other.0)
+    }
+
+    /// Whether no modifier at all is set.
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// The four modifiers, each on its own, for walking a set one at a time.
+    pub const ALL: [Modifiers; 4] = [
+        Modifiers::SHIFT,
+        Modifiers::CONTROL,
+        Modifiers::ALT,
+        Modifiers::META,
+    ];
 }
 
 /// The mouse buttons we distinguish. `Other` carries any extra button by its
@@ -191,6 +234,39 @@ mod tests {
     fn deltas_carry_their_components() {
         assert_eq!(MouseDelta::new(-3, 5), MouseDelta { dx: -3, dy: 5 });
         assert_eq!(ScrollDelta::new(0, -1), ScrollDelta { dx: 0, dy: -1 });
+    }
+
+    #[test]
+    fn both_sides_of_a_modifier_pair_control_the_same_modifier() {
+        // Left and right Shift are different keys but one modifier.
+        assert_eq!(KeyCode::new(0xE1).modifier(), Some(Modifiers::SHIFT));
+        assert_eq!(KeyCode::new(0xE5).modifier(), Some(Modifiers::SHIFT));
+        assert_eq!(KeyCode::new(0xE0).modifier(), Some(Modifiers::CONTROL));
+        assert_eq!(KeyCode::new(0xE4).modifier(), Some(Modifiers::CONTROL));
+        assert_eq!(KeyCode::new(0xE2).modifier(), Some(Modifiers::ALT));
+        assert_eq!(KeyCode::new(0xE6).modifier(), Some(Modifiers::ALT));
+        assert_eq!(KeyCode::new(0xE3).modifier(), Some(Modifiers::META));
+        assert_eq!(KeyCode::new(0xE7).modifier(), Some(Modifiers::META));
+    }
+
+    #[test]
+    fn an_ordinary_key_controls_no_modifier() {
+        assert_eq!(KeyCode::new(0x04).modifier(), None); // A
+        assert!(!KeyCode::new(0x04).is_modifier());
+        assert!(KeyCode::new(0xE1).is_modifier());
+        // Caps Lock latches a state; it is not one of the eight modifier keys.
+        assert!(!KeyCode::CAPS_LOCK.is_modifier());
+    }
+
+    #[test]
+    fn modifier_sets_can_be_narrowed_and_compared() {
+        let both = Modifiers::SHIFT.with(Modifiers::CONTROL);
+
+        assert_eq!(both.without(Modifiers::SHIFT), Modifiers::CONTROL);
+        assert_eq!(both.difference(Modifiers::SHIFT), Modifiers::CONTROL);
+        assert!(Modifiers::NONE.is_empty());
+        assert!(!both.is_empty());
+        assert_eq!(Modifiers::ALL.len(), 4);
     }
 
     #[test]
