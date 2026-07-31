@@ -45,3 +45,20 @@ jobs:
 
       - name: Build — WinUI 3 app
         run: dotnet build src/Omni.App/Omni.App.csproj --configuration Release -p:Platform=x64
+
+      # A build proves the markup compiles, not that the app opens: XAML resolves
+      # icon names, resource keys and bindings when it runs, and a bad one throws
+      # E_XAMLPARSEFAILED at startup with nothing to show for it. Publishing the
+      # app here means a runnable build can be downloaded from any commit and
+      # actually launched, instead of only existing after a release is tagged.
+      - name: Publish (self-contained, runnable)
+        run: >
+          dotnet publish src/Omni.App/Omni.App.csproj
+          -c Release -r win-x64 --self-contained -p:Platform=x64 -o publish
+
+      - name: Upload the runnable app
+        uses: actions/upload-artifact@v4
+        with:
+          name: omni-gui-win-x64
+          path: clients/omni-windows/publish
+          retention-days: 7
