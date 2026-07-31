@@ -5,7 +5,6 @@ use super::convert::{cg_button_number, flags_from_modifiers, next_click_count};
 use super::source::INJECTED_MARKER;
 use super::{MacosInputError, keymap};
 use crate::port::InputSink;
-use core_graphics::display::CGDisplay;
 use core_graphics::event::{
     CGEvent, CGEventTapLocation, CGEventType, CGMouseButton, EventField, ScrollEventUnit,
 };
@@ -100,15 +99,11 @@ impl MacosSink {
         self.move_to(position)
     }
 
-    /// Places the cursor at an absolute position on this screen. This is what a
+    /// Places the cursor at an absolute position on this desktop. This is what a
     /// remote controller drives — no read-back of the local cursor, so there is
     /// nothing to drift.
     fn inject_pointer(&mut self, x: i32, y: i32) -> Result<(), MacosInputError> {
-        let position = clamp_to_display(DisplayPoint {
-            x: x as f64,
-            y: y as f64,
-        });
-        self.move_to(position)
+        self.move_to(clamp_to_display(from_desktop(x, y)))
     }
 
     /// Posts a move (or a drag, if a button is held) to `position`.
@@ -233,10 +228,7 @@ impl InputSink for MacosSink {
     }
 
     fn warp(&mut self, x: i32, y: i32) -> Result<(), Self::Error> {
-        let position = clamp_to_display(DisplayPoint {
-            x: x as f64,
-            y: y as f64,
-        });
+        let position = clamp_to_display(from_desktop(x, y));
         let event = CGEvent::new_mouse_event(
             event_source()?,
             CGEventType::MouseMoved,
@@ -299,15 +291,29 @@ fn cursor_position() -> Result<DisplayPoint, MacosInputError> {
     })
 }
 
-/// Keeps an injected position on the main display.
-fn clamp_to_display(point: DisplayPoint) -> DisplayPoint {
-    let bounds = CGDisplay::main().bounds();
+/// Turns a position in desktop space — what a controller sends, 0-based — into
+/// the global display coordinates CGEvent speaks.
+fn from_desktop(x: i32, y: i32) -> DisplayPoint {
+    let (x, y) = match super::desktop_bounds() {
+        Some(bounds) => bounds.to_screen(x, y),
+        None => (x, y),
+    };
     DisplayPoint {
-        x: point
-            .x
-            .clamp(bounds.origin.x, bounds.origin.x + bounds.size.width - 1.0),
-        y: point
-            .y
-            .clamp(bounds.origin.y, bounds.origin.y + bounds.size.height - 1.0),
+        x: x as f64,
+        y: y as f64,
+    }
+}
+
+/// Keeps an injected position somewhere on the desktop — any display, not just
+/// the main one, since the cursor is free to be on any of them.
+fn clamp_to_display(point: DisplayPoint) -> DisplayPoint {
+    let Some(bounds) = super::desktop_bounds() else {
+        return point;
+    };
+    let left = bounds.origin_x as f64;
+    let top = bounds.origin_y as f64;
+    DisplayPoint {
+        x: point.x.clamp(left, left + bounds.width as f64 - 1.0),
+        y: point.y.clamp(top, top + bounds.height as f64 - 1.0),
     }
 }

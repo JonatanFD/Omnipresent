@@ -624,6 +624,13 @@ pub fn diagnose() -> Vec<crate::diag::Check> {
 /// every platform. (See the Windows adapter, where it declares DPI awareness.)
 pub fn prepare_process() {}
 
+/// The desktop's extent is not discoverable from evdev (it belongs to the
+/// display server); the Runtime falls back to configuration. Kept so all three
+/// adapters offer the same surface.
+pub fn desktop_bounds() -> Option<crate::port::DesktopBounds> {
+    None
+}
+
 /// The screen size is not discoverable from evdev (it belongs to the display
 /// server); the Runtime falls back to configuration.
 pub fn primary_screen_size() -> Option<(u32, u32)> {
