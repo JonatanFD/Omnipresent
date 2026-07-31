@@ -71,8 +71,8 @@ unsafe extern "C" {
 /// Reports whether the OS permissions capture and injection need are granted.
 ///
 /// The verdict is for *this process*. macOS attributes the Accessibility
-/// permission to the responsible app — for a CLI that is the terminal it runs
-/// from — so run this from the same terminal you run `omni start` from.
+/// permission to the responsible app — the terminal for a CLI run, the GUI app
+/// when the GUI starts the daemon — so check it the same way you start it.
 pub fn diagnose() -> Vec<crate::diag::Check> {
     use crate::diag::Check;
     let trusted = unsafe { AXIsProcessTrusted() } != 0;
@@ -85,9 +85,11 @@ pub fn diagnose() -> Vec<crate::diag::Check> {
         Check::failed(
             "accessibility permission",
             "not granted — System Settings → Privacy & Security → Accessibility: \
-             add the terminal you run `omni start` from. Rebuilding the binary \
-             revokes the grant; remove and re-add it after a rebuild, then \
-             restart the daemon",
+             add whatever launches the daemon. macOS grants this to the *responsible* \
+             app, which is the terminal when you run `omni start` yourself and \
+             Omnipresent.app when you start it from the app. Granting it to one does \
+             not grant it to the other. Rebuilding the binary revokes the grant; \
+             remove and re-add it after a rebuild, then restart the daemon",
         )
     };
     vec![check]

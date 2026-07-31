@@ -8,7 +8,8 @@
 //!   that peer's task as QUIC datagrams.
 //! - **receive → inject**: each established connection has a task that decodes
 //!   incoming datagrams, validates the session, rate-limits, and injects.
-//! - **IPC**: a Unix socket in the config dir serves the `omni` CLI.
+//! - **IPC**: the local channel in the config dir — a Unix socket, or a named
+//!   pipe on Windows — serves the `omni` CLI and the native GUIs.
 
 use crate::config::{Config, Paths};
 use crate::ipc::{

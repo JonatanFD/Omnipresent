@@ -6,8 +6,17 @@ and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
 _Last updated: 2026-07-30 (a **cross-platform audit** and its fixes: modifier
-keys, local IPC, input, and the **Windows GUI** brought to layout parity with the
-macOS app.
+keys, local IPC, input, packaging, and the **Windows GUI** brought to layout
+parity with the macOS app.
+
+**Arm64 Windows is no longer left out.** The GUI project declared `win-arm64`
+but the release only ever built x64, `omni update` had no triple for it, and
+`install.ps1` hard-coded x86_64 — so an Arm Windows machine got nothing, while
+Apple silicon and Intel were both covered. Both the CLI and the GUI now ship for
+x64 and arm64, and the installer picks by machine. The macOS app's deployment
+target dropped from 26.5 to 14.0, which is what its APIs actually need
+(`@Observable`, `ContentUnavailableView`) rather than the version it happened to
+be created on.
 
 **Command and Control can be swapped per peer.** Copy is Command-C on a Mac and
 Control-C everywhere else, and each machine faithfully sends the key it was
@@ -313,12 +322,14 @@ and `cargo test` (98 tests), including on Windows.
 
 ### What `omni-runtime` provides
 
-- **Paths & config** (`config`): everything lives in one directory
-  (`~/.config/omnipresent` on Linux, `~/Library/Application Support/omnipresent`
-  on macOS, `%APPDATA%\omnipresent` on Windows): `config.json` (UDP port,
-  default 4733; optional screen-size override; per-host edge placements),
+- **Paths & config** (`config`): everything lives in one directory named `omni`
+  (`~/.config/omni` on Linux, `~/Library/Application Support/omni` on macOS,
+  `%APPDATA%\omni` on Windows — the platform config directory, overridable with
+  `OMNI_CONFIG_DIR`): `config.json` (UDP port, default 4733; optional
+  screen-size override; per-host edge placements; per-host modifier swaps),
   certificate + key, `trust.json`, the IPC socket (or named pipe on Windows),
-  and the log.
+  and the log. Both native clients reproduce this derivation, so the names here
+  are part of the contract rather than an implementation detail.
 - **Identity** (`identity`): generates a self-signed certificate on first run
   (via `rcgen`), persists it with `0600` permissions, reloads it afterwards —
   so the machine's fingerprint is stable across restarts.

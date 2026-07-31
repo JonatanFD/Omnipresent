@@ -8,7 +8,16 @@
 $ErrorActionPreference = 'Stop'
 
 $repo = 'JonatanFD/omnipresent'
-$target = 'x86_64-pc-windows-msvc'
+
+# Match the build to the machine. PROCESSOR_ARCHITECTURE reports the *process*
+# architecture, so an x86 PowerShell on an Arm box would answer AMD64 — the
+# native value in PROCESSOR_ARCHITEW6432 wins when it is set.
+$arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+$target = switch ($arch) {
+    'ARM64' { 'aarch64-pc-windows-msvc' }
+    'AMD64' { 'x86_64-pc-windows-msvc' }
+    default { throw "unsupported Windows architecture: $arch" }
+}
 $asset = "omni-$target.zip"
 $url = "https://github.com/$repo/releases/latest/download/$asset"
 
