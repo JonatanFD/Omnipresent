@@ -166,7 +166,7 @@ impl MouseDelta {
 }
 
 /// Scroll wheel movement. `dx` is horizontal, `dy` vertical; positive `dy` is a
-/// scroll up. The unit is scroll pixels — see [`PIXELS_PER_WHEEL_NOTCH`].
+/// scroll up. The unit is milli-lines — see [`MILLILINES_PER_LINE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ScrollDelta {
     pub dx: i32,
@@ -179,25 +179,30 @@ impl ScrollDelta {
     }
 }
 
-/// How many [`ScrollDelta`] units one notch of a mouse wheel is worth.
+/// How many [`ScrollDelta`] units one line of scrolling is worth. One notch of a
+/// mouse wheel is one line.
 ///
-/// A `ScrollDelta` is measured in scroll pixels, because that is the finest
-/// thing any platform reports: macOS hands out continuous pixel deltas (a
-/// trackpad produces many small ones), while Windows and Linux report whole
-/// wheel notches. The notched platforms multiply by this constant on the way out
-/// and divide on the way in, keeping the remainder so nothing is lost.
+/// A `ScrollDelta` is measured in **lines**, not pixels, and that choice decides
+/// who picks the scrolling speed. A line is what every desktop OS lets its user
+/// size: Windows has "lines to scroll per notch", macOS has a scrolling-speed
+/// slider, and each application turns a line into pixels using its own row
+/// height. So a machine sends *how far the wheel turned* and the machine
+/// receiving it decides *how much that should scroll*, using its own settings —
+/// which is what a user expects from their own computer.
 ///
-/// It lives here, in the shared vocabulary, because it defines what a unit on
-/// the wire *means*. With each platform picking its own number, one notch on a
-/// Mac and one notch on a PC scrolled visibly different amounts. The value is
-/// matched to the delta macOS reports for a single notch, so a notch is a notch
-/// in every direction; the notched platforms only have to agree with each other,
-/// so they stay consistent whatever it is set to.
-pub const PIXELS_PER_WHEEL_NOTCH: i32 = 10;
+/// Sending pixels instead put that decision on the sending machine, and the two
+/// sinks disagreed about it: Windows converted back to notches and let Windows
+/// scale them, while macOS injected the pixels as final, so macOS never applied
+/// its own speed and a Mac scrolled a fraction of what it should.
+///
+/// The unit is a **thousandth** of a line so that continuous devices survive it.
+/// A mouse wheel turns in whole notches, but a trackpad reports fractions of a
+/// line, and a whole-number unit would round every small swipe away to nothing.
+pub const MILLILINES_PER_LINE: i32 = 1_000;
 
-// A zero or negative notch would make the notched platforms drop every scroll,
-// or scroll backwards. Checked here so it can never be set to one.
-const _: () = assert!(PIXELS_PER_WHEEL_NOTCH > 0);
+// A zero or negative line would make every platform drop scrolling entirely, or
+// scroll backwards. Checked here so it can never be set to one.
+const _: () = assert!(MILLILINES_PER_LINE > 0);
 
 #[cfg(test)]
 mod tests {

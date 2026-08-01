@@ -45,7 +45,10 @@
                 </NavigationViewItem.Content>
             </NavigationViewItem>
 
-            <NavigationViewItem Content="Connections" Icon="Network" Tag="connections">
+            <!-- Globe, not Network: there is no Symbol.Network, and an icon name
+                 that does not resolve fails the XAML parse at *runtime*, which
+                 takes the whole window down before it can be shown. -->
+            <NavigationViewItem Content="Connections" Icon="Globe" Tag="connections">
                 <NavigationViewItem.InfoBadge>
                     <controls:InfoBadge
                         Value="{x:Bind ViewModel.PendingCount, Mode=OneWay}"

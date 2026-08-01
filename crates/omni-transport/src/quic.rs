@@ -36,12 +36,19 @@ const KEEP_ALIVE: Duration = Duration::from_secs(5);
 /// only tens of bytes, so this still holds a healthy burst.
 const DATAGRAM_SEND_BUFFER: usize = 16 * 1024;
 
-/// The largest control frame we will read. Session signalling is tiny, but the
-/// control stream also carries clipboard payloads — including images, which are
-/// far bigger than a control message — so the limit must admit a full clipboard
-/// payload (capped at [`MAX_CLIPBOARD_BYTES`]) plus the small postcard framing
-/// overhead. Anything beyond that is a protocol violation, not a message.
-const MAX_CONTROL_FRAME: usize = MAX_CLIPBOARD_BYTES + 1024;
+/// The largest control frame we will read. Session signalling is tiny — a
+/// connect request, an accept, a heartbeat — so the limit is small. Anything
+/// bigger is a protocol violation, not a message.
+///
+/// Keeping it small is what stops a large payload from being sent this way. The
+/// control stream is also where heartbeats travel, and a reader stuck taking
+/// delivery of a screenshot is a reader not answering them: the peer concludes
+/// the session is dead. Bulk payloads go on their own stream instead.
+const MAX_CONTROL_FRAME: usize = 64 * 1024;
+
+/// The largest bulk frame we will read: a full clipboard payload (capped at
+/// [`MAX_CLIPBOARD_BYTES`]) plus the small postcard framing overhead.
+const MAX_BULK_FRAME: usize = MAX_CLIPBOARD_BYTES + 1024;
 
 /// Why a QUIC operation failed.
 #[derive(Debug)]
@@ -64,6 +71,8 @@ pub enum QuicError {
     Codec(CodecError),
     /// The peer sent a control frame larger than [`MAX_CONTROL_FRAME`].
     ControlFrameTooLarge(usize),
+    /// The peer sent a bulk frame larger than [`MAX_BULK_FRAME`].
+    BulkFrameTooLarge(usize),
     /// The handshake completed without a peer certificate — should be
     /// impossible with mandatory mTLS, and is treated as fatal.
     MissingPeerCertificate,
@@ -82,6 +91,9 @@ impl std::fmt::Display for QuicError {
             QuicError::Codec(e) => write!(f, "codec error: {e}"),
             QuicError::ControlFrameTooLarge(len) => {
                 write!(f, "control frame of {len} bytes exceeds the limit")
+            }
+            QuicError::BulkFrameTooLarge(len) => {
+                write!(f, "bulk frame of {len} bytes exceeds the limit")
             }
             QuicError::MissingPeerCertificate => {
                 write!(f, "peer presented no certificate")
@@ -187,11 +199,15 @@ pub struct QuicConnection {
     peer_fingerprint: Fingerprint,
     /// Datagrams received by the background pump, waiting to be polled.
     datagrams: mpsc::UnboundedReceiver<Bytes>,
+    /// Bulk payloads read by the background pump, waiting to be polled. Reading
+    /// happens there so that taking delivery of something large never holds up
+    /// whoever is answering heartbeats. Taken out once, by whoever handles them.
+    bulk: Option<mpsc::UnboundedReceiver<Message>>,
 }
 
 impl QuicConnection {
     /// Wraps an established quinn connection: extracts the peer's certificate
-    /// fingerprint and starts the datagram pump.
+    /// fingerprint and starts the datagram and bulk pumps.
     fn wrap(connection: quinn::Connection) -> Result<Self, QuicError> {
         let peer_fingerprint = peer_fingerprint(&connection)?;
 
@@ -206,10 +222,31 @@ impl QuicConnection {
             }
         });
 
+        let (bulk_tx, bulk) = mpsc::unbounded_channel();
+        let bulk_pump = connection.clone();
+        tokio::spawn(async move {
+            // One stream carries one payload. They are taken in the order the
+            // peer opened them, so a newer clipboard copy never overtakes an
+            // older one still arriving.
+            while let Ok(mut stream) = bulk_pump.accept_uni().await {
+                match read_bulk_frame(&mut stream).await {
+                    Ok(message) => {
+                        if bulk_tx.send(message).is_err() {
+                            break;
+                        }
+                    }
+                    // One malformed or oversized payload is dropped; the
+                    // connection itself is still good for everything else.
+                    Err(e) => tracing::debug!(%e, "discarding a bulk payload"),
+                }
+            }
+        });
+
         Ok(Self {
             connection,
             peer_fingerprint,
             datagrams,
+            bulk: Some(bulk),
         })
     }
 
@@ -222,6 +259,22 @@ impl QuicConnection {
     /// The peer's network address.
     pub fn remote_address(&self) -> SocketAddr {
         self.connection.remote_address()
+    }
+
+    /// A handle for sending bulk payloads, cheap to clone and usable from
+    /// another task — which is the point: writing a large payload must not
+    /// happen anywhere that also has to answer heartbeats.
+    pub fn bulk_sender(&self) -> BulkSender {
+        BulkSender {
+            connection: self.connection.clone(),
+        }
+    }
+
+    /// Takes the receiving end of the bulk stream, so bulk payloads can be
+    /// awaited apart from the datagrams this connection also carries. Available
+    /// once; afterwards this returns `None`.
+    pub fn take_bulk_receiver(&mut self) -> Option<BulkReceiver> {
+        self.bulk.take().map(|payloads| BulkReceiver { payloads })
     }
 
     /// Opens the reliable control stream (initiator side).
@@ -317,6 +370,85 @@ impl crate::transport::Transport<QuicConnection> {
     }
 }
 
+/// Sends bulk payloads — clipboard contents, and anything else too big to be
+/// signalling — each on a QUIC stream of its own.
+///
+/// A stream per payload is what keeps one large transfer from delaying the
+/// next, and keeps both of them away from the control stream, where a delay
+/// costs a heartbeat and therefore the session. Cloning is cheap, so the task
+/// doing the writing can be one that has nothing else to answer for.
+#[derive(Debug, Clone)]
+pub struct BulkSender {
+    connection: quinn::Connection,
+}
+
+impl BulkSender {
+    /// Sends one payload on a new stream, framed with a 4-byte big-endian
+    /// length, and closes the stream behind it.
+    pub async fn send(&self, message: &Message) -> Result<(), QuicError> {
+        let payload = encode(message).map_err(QuicError::Codec)?;
+        if payload.len() > MAX_BULK_FRAME {
+            return Err(QuicError::BulkFrameTooLarge(payload.len()));
+        }
+        let len = u32::try_from(payload.len())
+            .map_err(|_| QuicError::BulkFrameTooLarge(payload.len()))?;
+
+        let mut stream = self
+            .connection
+            .open_uni()
+            .await
+            .map_err(QuicError::Connection)?;
+        stream
+            .write_all(&len.to_be_bytes())
+            .await
+            .map_err(QuicError::Write)?;
+        stream.write_all(&payload).await.map_err(QuicError::Write)?;
+        // Marks the payload complete. Closing an already-closed stream is
+        // harmless.
+        let _ = stream.finish();
+        Ok(())
+    }
+}
+
+/// Receives bulk payloads, already read whole by the connection's pump. Waiting
+/// here costs nothing while a large one is still in transit.
+#[derive(Debug)]
+pub struct BulkReceiver {
+    payloads: mpsc::UnboundedReceiver<Message>,
+}
+
+impl BulkReceiver {
+    /// Waits for the next payload. Returns `None` once the connection closes.
+    pub async fn recv(&mut self) -> Option<Message> {
+        self.payloads.recv().await
+    }
+}
+
+/// Reads one length-prefixed payload from a bulk stream.
+async fn read_bulk_frame(stream: &mut quinn::RecvStream) -> Result<Message, QuicError> {
+    let mut len_buf = [0u8; 4];
+    stream
+        .read_exact(&mut len_buf)
+        .await
+        .map_err(QuicError::Read)?;
+    let len = frame_len(len_buf, MAX_BULK_FRAME).map_err(QuicError::BulkFrameTooLarge)?;
+    let mut payload = vec![0u8; len];
+    stream
+        .read_exact(&mut payload)
+        .await
+        .map_err(QuicError::Read)?;
+    decode(&payload).map_err(QuicError::Codec)
+}
+
+/// The length a frame header announces, refused if it is over `limit`.
+///
+/// Checked before the buffer is allocated: the number comes from the peer, so
+/// believing it outright would let one announce a size that exhausts memory.
+fn frame_len(header: [u8; 4], limit: usize) -> Result<usize, usize> {
+    let len = u32::from_be_bytes(header) as usize;
+    if len > limit { Err(len) } else { Ok(len) }
+}
+
 /// The reliable signalling stream: length-prefixed Protocol [`Message`]s over
 /// one QUIC bidirectional stream. Loss here is retransmitted by QUIC — exactly
 /// what connect/accept/disconnect need (and what input events must avoid).
@@ -396,10 +528,7 @@ impl ControlReceiver {
             Err(quinn::ReadExactError::FinishedEarly(0)) => return Ok(None),
             Err(e) => return Err(QuicError::Read(e)),
         }
-        let len = u32::from_be_bytes(len_buf) as usize;
-        if len > MAX_CONTROL_FRAME {
-            return Err(QuicError::ControlFrameTooLarge(len));
-        }
+        let len = frame_len(len_buf, MAX_CONTROL_FRAME).map_err(QuicError::ControlFrameTooLarge)?;
         let mut payload = vec![0u8; len];
         self.recv
             .read_exact(&mut payload)

@@ -13,6 +13,7 @@ use super::convert::{
 use super::{MacosInputError, keymap};
 use crate::macos::convert::button_from_cg_number;
 use crate::port::InputSource;
+use crate::scroll::millilines_from_lines;
 use core_foundation::base::TCFType;
 use core_foundation::mach_port::CFMachPortRef;
 use core_foundation::runloop::{CFRunLoop, CFRunLoopRef, kCFRunLoopCommonModes};
@@ -329,12 +330,19 @@ fn convert_one(
             })
         }
         CGEventType::ScrollWheel => {
-            let dy = event
-                .get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_1)
-                as i32;
-            let dx = event
-                .get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_2)
-                as i32;
+            // The fixed-point fields report scrolling as a fractional number of
+            // *lines*. The pixel fields report the same movement after macOS has
+            // applied this Mac's own scrolling speed to it — which is the
+            // receiving machine's decision to make, not ours, so they are not
+            // used. Axis 1 is vertical, axis 2 horizontal.
+            let dy =
+                millilines_from_lines(event.get_double_value_field(
+                    EventField::SCROLL_WHEEL_EVENT_FIXED_POINT_DELTA_AXIS_1,
+                ));
+            let dx =
+                millilines_from_lines(event.get_double_value_field(
+                    EventField::SCROLL_WHEEL_EVENT_FIXED_POINT_DELTA_AXIS_2,
+                ));
             if dx == 0 && dy == 0 {
                 None
             } else {

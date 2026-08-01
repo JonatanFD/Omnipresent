@@ -35,10 +35,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     UnhookWindowsHookEx, WH_MOUSE_LL,
 };
 
-/// How many protocol scroll pixels one Windows wheel notch carries. Taken from
-/// the shared vocabulary so a notch here and a notch on the other machine are
-/// worth the same amount of scrolling.
-pub(crate) const PIXELS_PER_WHEEL_CLICK: i32 = omni_protocol::input::PIXELS_PER_WHEEL_NOTCH;
+/// How many protocol scroll units one Windows wheel notch carries. A notch is
+/// one line, taken from the shared vocabulary so that the machine receiving it
+/// decides how far a line scrolls, using its own settings.
+pub(crate) const UNITS_PER_WHEEL_NOTCH: i32 = omni_protocol::input::MILLILINES_PER_LINE;
 
 /// Why a Windows input operation failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -943,17 +943,65 @@ async fn resolve_host(host_arg: &str, default_port: u16) -> Result<(String, Sock
     Ok((host, addr))
 }
 
+/// Sends clipboard payloads to one peer, one at a time and in the order they
+/// were copied.
+///
+/// This runs as its own task so that writing a large payload — a screenshot is
+/// megabytes — never happens on the task that also has to send and answer
+/// heartbeats. It used to, and a copy big enough to take a few seconds looked
+/// exactly like a machine that had stopped responding, so both ends tore the
+/// session down.
+///
+/// Sequential on purpose: a payload finishes before the next one starts, so a
+/// newer copy cannot overtake an older one and leave the peer with the wrong
+/// clipboard. `send` reports whether the payload went out; once it cannot, the
+/// connection is gone and there is nothing left to send.
+async fn run_clipboard_sender<S, F>(mut payloads: mpsc::UnboundedReceiver<ClipboardData>, send: S)
+where
+    S: Fn(ClipboardData) -> F,
+    F: std::future::Future<Output = bool>,
+{
+    while let Some(data) = payloads.recv().await {
+        if !send(data).await {
+            break;
+        }
+    }
+}
+
 /// The per-connection task: pump datagrams in, commands out, until the
 /// session or the connection ends.
 async fn run_peer(
     shared: Arc<Shared>,
-    connection: QuicConnection,
+    mut connection: QuicConnection,
     control: omni_transport::ControlStream,
     mut commands: mpsc::UnboundedReceiver<PeerCommand>,
     session: SessionId,
     machine: MachineId,
 ) {
     let (mut control_tx, mut control_rx) = control.split();
+
+    // Clipboard payloads leave on their own QUIC stream, written by their own
+    // task. Nothing below may await a large write: this loop is what keeps the
+    // session alive, and a peer that stops answering for a few seconds is
+    // indistinguishable from a peer that has died.
+    let bulk = connection.bulk_sender();
+    let mut incoming_bulk = connection
+        .take_bulk_receiver()
+        .expect("a fresh connection still has its bulk receiver");
+    let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel::<ClipboardData>();
+    tokio::spawn(run_clipboard_sender(clipboard_rx, move |data| {
+        let bulk = bulk.clone();
+        async move {
+            match bulk.send(&Message::Clipboard(data)).await {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::debug!(%e, "could not send the clipboard to the peer");
+                    false
+                }
+            }
+        }
+    }));
+
     let mut transport = Transport::new(connection);
     let mut limiter = RateLimiter::default();
     let mut dropped: u64 = 0;
@@ -1001,7 +1049,9 @@ async fn run_peer(
                             }
                         }
                         PeerCommand::Clipboard(data) => {
-                            if control_tx.send(&Message::Clipboard(data)).await.is_err() {
+                            // Handed over, not written here: see
+                            // `run_clipboard_sender`. This must not wait.
+                            if clipboard_tx.send(data).is_err() {
                                 closing = true;
                                 break;
                             }
@@ -1052,9 +1102,19 @@ async fn run_peer(
                             warp(&shared, x, y);
                         }
                     }
-                    Ok(Some(Message::Clipboard(data))) => {
-                        // Apply the peer's clipboard locally. Silently ignored
-                        // when sharing is off (the manager returns `Disabled`).
+                    Ok(Some(_)) => {} // heartbeats keep the session alive
+                    Err(_) => break,
+                }
+            },
+            payload = incoming_bulk.recv() => {
+                // Clipboard payloads arrive on their own stream, already read
+                // whole by the transport's pump — so a large one never held
+                // this loop up while it was in transit.
+                match payload {
+                    Some(Message::Clipboard(data)) => {
+                        deadline = tokio::time::Instant::now() + HEARTBEAT_TIMEOUT;
+                        // Applied locally, and silently ignored when sharing is
+                        // off (the manager returns `Disabled`).
                         match shared.clipboard.handle_remote_update(data) {
                             Ok(()) | Err(ClipboardError::Disabled) => {}
                             Err(e) => {
@@ -1062,8 +1122,8 @@ async fn run_peer(
                             }
                         }
                     }
-                    Ok(Some(_)) => {} // heartbeats keep the session alive
-                    Err(_) => break,
+                    Some(_) => {} // only clipboard payloads travel in bulk
+                    None => break, // connection closed
                 }
             },
             _ = heartbeat.tick() => {
@@ -1647,5 +1707,67 @@ mod tests {
     #[test]
     fn an_empty_batch_stays_empty() {
         assert_eq!(coalesce_motion(vec![]), vec![]);
+    }
+
+    /// Records what was sent, taking its time over the first payload so that a
+    /// later one would overtake it if sending were not sequential.
+    fn recording_sender(
+        recorded: Arc<std::sync::Mutex<Vec<String>>>,
+    ) -> impl Fn(ClipboardData) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>
+    {
+        move |data| {
+            let recorded = recorded.clone();
+            Box::pin(async move {
+                let ClipboardData::Text(text) = data else {
+                    return true;
+                };
+                if text == "first" {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                recorded.lock().unwrap().push(text);
+                true
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn clipboard_payloads_are_sent_one_after_another_in_order() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        for text in ["first", "second", "third"] {
+            tx.send(ClipboardData::Text(text.to_string())).unwrap();
+        }
+        drop(tx);
+
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        run_clipboard_sender(rx, recording_sender(recorded.clone())).await;
+
+        // A big copy takes a while to go out. The one made after it must still
+        // arrive after it, or the peer ends up with an older clipboard.
+        assert_eq!(*recorded.lock().unwrap(), vec!["first", "second", "third"]);
+    }
+
+    #[tokio::test]
+    async fn sending_stops_once_the_connection_is_gone() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        for text in ["first", "second"] {
+            tx.send(ClipboardData::Text(text.to_string())).unwrap();
+        }
+        drop(tx);
+
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = recorded.clone();
+        run_clipboard_sender(rx, move |data| {
+            let seen = seen.clone();
+            Box::pin(async move {
+                if let ClipboardData::Text(text) = data {
+                    seen.lock().unwrap().push(text);
+                }
+                false // the connection failed
+            }) as std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>
+        })
+        .await;
+
+        // Nothing is attempted after a failure: the session is being torn down.
+        assert_eq!(*recorded.lock().unwrap(), vec!["first"]);
     }
 }

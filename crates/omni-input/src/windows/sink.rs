@@ -14,8 +14,9 @@
 //! makes up the difference before pressing the key. macOS gets this for free by
 //! stamping the flags on each event.
 
-use super::{PIXELS_PER_WHEEL_CLICK, WindowsInputError, keymap};
+use super::{WindowsInputError, keymap};
 use crate::port::InputSink;
+use crate::scroll::ScrollAccumulator;
 use omni_protocol::InputEvent;
 use omni_protocol::input::{Action, Modifiers, MouseButton, ScrollDelta};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -81,10 +82,9 @@ pub(super) fn reconcile(held: Modifiers, wanted: Modifiers) -> Vec<ModifierFix> 
 /// Injects remote input into the local OS. The production `InputSink`.
 #[derive(Debug, Default)]
 pub struct WindowsSink {
-    /// Sub-notch scroll remainders, so small pixel deltas accumulate into whole
-    /// wheel notches instead of vanishing.
-    scroll_rem_x: i32,
-    scroll_rem_y: i32,
+    /// Turns the milli-lines that arrive into whole wheel notches, holding back
+    /// what falls short of one so slow scrolling is not lost.
+    scroll: ScrollAccumulator,
     /// The modifiers this sink believes are down, from what it has injected. Kept
     /// in step with the controller's view so a lost datagram cannot strand one.
     held: Modifiers,
@@ -204,12 +204,10 @@ impl WindowsSink {
     }
 
     fn inject_scroll(&mut self, delta: ScrollDelta) -> Result<(), WindowsInputError> {
-        self.scroll_rem_x += delta.dx;
-        self.scroll_rem_y += delta.dy;
-        let notches_x = self.scroll_rem_x / PIXELS_PER_WHEEL_CLICK;
-        let notches_y = self.scroll_rem_y / PIXELS_PER_WHEEL_CLICK;
-        self.scroll_rem_x -= notches_x * PIXELS_PER_WHEEL_CLICK;
-        self.scroll_rem_y -= notches_y * PIXELS_PER_WHEEL_CLICK;
+        // A notch is one line. Windows scales it by the user's "lines to scroll
+        // per notch" setting when the application reads the event, so how far
+        // this actually scrolls is decided here, not by the machine that sent it.
+        let (notches_x, notches_y) = self.scroll.take_lines(delta);
         if notches_y != 0 {
             self.inject_mouse(MOUSEEVENTF_WHEEL, notches_y * WHEEL_DELTA as i32, 0, 0)?;
         }
