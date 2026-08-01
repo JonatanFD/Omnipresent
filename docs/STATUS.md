@@ -5,7 +5,23 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-07-30 (a **cross-platform audit** and its fixes: display
+_Last updated: 2026-08-01 (**scrolling now runs at the speed each machine's own
+owner chose.** Scrolling travelled as pixels, and the two sinks disagreed about
+what to do with them: Windows converted back to wheel notches and let Windows
+scale them by the user's "lines to scroll per notch", while macOS injected the
+pixels as final. So a notch sent from a PC moved a Mac by ten literal pixels —
+a fraction of what one notch should do — and the Mac's own scrolling-speed
+setting never got a say. The wire now carries **lines** (in thousandths, so a
+trackpad's fractions survive) instead of pixels: a machine reports *how far the
+wheel turned* and the machine receiving it decides *how much that should
+scroll*, using its own settings. macOS injects with `ScrollEventUnit::LINE` and
+its source reads the fixed-point **line** delta rather than the pixel delta,
+which had this Mac's speed already applied — a decision that belongs to the
+machine on the other end. One shared `ScrollAccumulator` holds back movement
+shorter than a whole line on all three platforms, replacing the same remainder
+arithmetic written out separately in each sink.
+
+Earlier: a **cross-platform audit** and its fixes: display
 geometry, modifier keys, local IPC, input, packaging, and the **Windows GUI**
 brought to layout parity with the macOS app.
 
@@ -215,11 +231,11 @@ and `cargo test` (98 tests), including on Windows.
 
 | Crate            | Status        | What's there                                                                 |
 | ---------------- | ------------- | ---------------------------------------------------------------------------- |
-| `omni-protocol`  | **Implemented** | Ids, input events, control messages (incl. screen sizes and `CursorWarp`), clipboard payloads (`ClipboardData`/`ClipboardImage`, size-capped + overflow-checked), and the postcard wire codec. 21 tests. |
+| `omni-protocol`  | **Implemented** | Ids, input events, control messages (incl. screen sizes and `CursorWarp`), clipboard payloads (`ClipboardData`/`ClipboardImage`, size-capped + overflow-checked), and the postcard wire codec. Scrolling is measured in lines, not pixels, so the machine receiving it sets the speed. 34 tests. |
 | `omni-topology`  | **Implemented** | Virtual desktop layout, edge crossings, and the `LayoutStore` port. 13 tests. |
 | `omni-security`  | **Implemented** | Allowlist + TOFU trust policy, `TrustStore`/`CertProvider` ports, self-signed identity generation. 15 tests. |
 | `omni-session`   | **Implemented** | Session lifecycle, dynamic roles, active-target routing, `SessionEvents` port. 12 tests. |
-| `omni-input`     | **Implemented** | Ports, in-memory adapters, permission diagnostics, and the real OS adapters: macOS (CGEvent tap + post; the sink warps the cursor so a remote-driven move stays visible and stamps the click-count so double/triple clicks register), Linux (evdev + uinput), and Windows (low-level hooks + SendInput; the local cursor is parked, not hidden). Cursor **hiding** on suppression where it is safe and self-restoring (macOS `CGDisplayHideCursor`, Linux X11 empty-cursor on the root window) and true Linux cursor-position query (`XQueryPointer`). 17 tests. |
+| `omni-input`     | **Implemented** | Ports, in-memory adapters, permission diagnostics, and the real OS adapters: macOS (CGEvent tap + post; the sink warps the cursor so a remote-driven move stays visible and stamps the click-count so double/triple clicks register), Linux (evdev + uinput), and Windows (low-level hooks + SendInput; the local cursor is parked, not hidden). Cursor **hiding** on suppression where it is safe and self-restoring (macOS `CGDisplayHideCursor`, Linux X11 empty-cursor on the root window) and true Linux cursor-position query (`XQueryPointer`). A shared `ScrollAccumulator` converts the wire's lines into each OS's own scroll unit. 39 tests. |
 | `omni-clipboard` | **Implemented** | Opt-in clipboard sharing (text + images) over a ports-and-adapters design: `arboard` adapter, in-memory mock, echo-loop guard, strict opt-in toggle queryable at runtime. 8 tests. |
 | `omni-transport` | **Implemented** | `SecureChannel` port, framing, loopback channel, and the real QUIC adapter (quinn + rustls, mTLS, TOFU verifiers, datagrams + control stream). The control-frame limit admits a full clipboard payload so images sync over the reliable stream. The input path is tuned for latency: a shallow datagram send buffer (drops oldest stale positions) and the BBR congestion controller. 13 tests. |
 | `omni-runtime`   | **Implemented** | The daemon: config/paths, persistent identity, trust store, rate limiter, cross-platform IPC (Unix socket / Windows named pipe), heartbeats, configurable layout, opt-in clipboard sync over the control stream (toggleable at runtime and persisted), doctor checks, and the composition root that runs the pipelines. The peer task coalesces a backlog of queued cursor positions to the latest one (keeping clicks/keys/scrolls intact) so a congested link does not make the cursor lag. A live IPC event channel (`Subscribe` → `Event` snapshots, push not poll) and a protocol-version handshake (`Hello`) back native GUI clients. 28 tests + two integration tests. |
@@ -231,7 +247,10 @@ and `cargo test` (98 tests), including on Windows.
   (a 32-byte SHA-256 digest that renders as lowercase hex for TOFU pinning).
 - **Input events** (`input`): a platform-neutral `InputEvent` with `Key`,
   `Motion`, `Button`, and `Scroll` variants; `KeyCode` (USB HID usage codes),
-  packed `Modifiers`, `MouseButton`, `MouseDelta`, `ScrollDelta`.
+  packed `Modifiers`, `MouseButton`, `MouseDelta`, `ScrollDelta` (measured in
+  `MILLILINES_PER_LINE` units — thousandths of a line, so the receiving machine
+  applies its own scrolling speed and a trackpad's fractions are not rounded
+  away).
 - **Control messages** (`control`): `ControlMessage` (`ConnectRequest`, `Accept`,
   `Reject`, `Disconnect`, `Heartbeat`, `CursorWarp`) and `RejectReason`.
 - **Wire codec** (`wire`): the `Message` envelope (`Input`, `Control`,
@@ -287,6 +306,12 @@ and `cargo test` (98 tests), including on Windows.
 - **Ports** (`port`): `InputSource` (non-blocking `poll` to capture) and
   `InputSink` (`inject` to synthesize), each with an associated error type so
   real OS adapters can report failures.
+- **Scrolling** (`scroll`): `ScrollAccumulator` turns the wire's milli-lines
+  into the whole lines, notches, or wheel clicks an OS accepts, holding back
+  what falls short of one so slow scrolling adds up instead of vanishing;
+  `millilines_from_lines` converts a platform's fractional line count the other
+  way, never rounding a real movement away to nothing. Pure and shared by all
+  three sinks, so the arithmetic is tested on every platform.
 - **In-memory adapters** (`memory`): `QueuedSource` replays a scripted sequence
   of events; `RecordingSink` records what is injected. Together they stand in for
   hardware and exercise the capture→send and receive→inject pipelines.
@@ -514,4 +539,7 @@ both consume. Linux stays CLI-only.
   one request, one response. Simple, debuggable, and access-controlled by the
   platform's own mechanism.
 - Wire-format versioning: whether to prepend a protocol version byte in Transport
-  framing (deliberately left out of the Protocol codec for now).
+  framing (deliberately left out of the Protocol codec for now). The cost showed
+  up when scrolling changed unit: two machines must run matching versions, and a
+  mismatched pair scrolls wrongly with nothing to warn them. The IPC has a
+  version handshake; the peer-to-peer wire does not.

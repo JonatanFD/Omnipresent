@@ -5,6 +5,7 @@ use super::convert::{cg_button_number, flags_from_modifiers, next_click_count};
 use super::source::INJECTED_MARKER;
 use super::{MacosInputError, keymap};
 use crate::port::InputSink;
+use crate::scroll::ScrollAccumulator;
 use core_graphics::event::{
     CGEvent, CGEventTapLocation, CGEventType, CGMouseButton, EventField, ScrollEventUnit,
 };
@@ -67,6 +68,9 @@ pub struct MacosSink {
     /// The last button press, so a quick second press at the same spot is
     /// tagged as a double-click rather than two single clicks.
     last_click: Option<LastClick>,
+    /// Turns the milli-lines that arrive into whole lines, holding back what
+    /// falls short of one so slow scrolling is not lost.
+    scroll: ScrollAccumulator,
 }
 
 impl MacosSink {
@@ -194,14 +198,21 @@ impl MacosSink {
     }
 
     fn inject_scroll(&mut self, delta: ScrollDelta) -> Result<(), MacosInputError> {
-        // Wheel 1 is the vertical axis, wheel 2 the horizontal, in pixels —
-        // mirroring what the source captures.
+        // Scrolling is delivered in *lines*, not pixels, so each application
+        // turns a line into however many pixels its own content needs. Pixels
+        // would be final, and the small number a wheel notch is worth on the
+        // wire would then scroll a fraction of what one notch should.
+        let (lines_x, lines_y) = self.scroll.take_lines(delta);
+        if lines_x == 0 && lines_y == 0 {
+            return Ok(());
+        }
+        // Wheel 1 is the vertical axis, wheel 2 the horizontal.
         let event = CGEvent::new_scroll_event(
             event_source()?,
-            ScrollEventUnit::PIXEL,
+            ScrollEventUnit::LINE,
             2,
-            delta.dy,
-            delta.dx,
+            lines_y,
+            lines_x,
             0,
         )
         .map_err(|_| MacosInputError::EventCreation)?;

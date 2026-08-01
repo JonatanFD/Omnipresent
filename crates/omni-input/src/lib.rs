@@ -13,6 +13,7 @@
 pub mod diag;
 pub mod memory;
 pub mod port;
+pub mod scroll;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
