@@ -5,7 +5,16 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-08-01 (**scrolling now runs at the speed each machine's own
+_Last updated: 2026-08-01 (**a QUIC security advisory closed.**
+`quinn-proto` is on 0.11.15, which fixes GHSA-4w2j-m93h-cj5j — a peer that
+sends stream fragments while leaving out earlier parts makes the receiver's
+reassembly buffer grow without bound, exhausting memory (CVSS 7.5). Reaching it
+takes a peer that already completed the mTLS handshake and passed TOFU and the
+allowlist, so an anonymous machine on the network cannot, but a peer that turns
+hostile or is compromised can. It applies squarely here: the clipboard's bulk
+streams are read sequentially, which is the shape the advisory describes.
+
+Earlier the same day: **scrolling now runs at the speed each machine's own
 owner chose.** Scrolling travelled as pixels, and the two sinks disagreed about
 what to do with them: Windows converted back to wheel notches and let Windows
 scale them by the user's "lines to scroll per notch", while macOS injected the
