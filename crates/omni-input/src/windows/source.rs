@@ -35,7 +35,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_XBUTTONUP, XBUTTON1,
 };
 
-use super::{PIXELS_PER_WHEEL_CLICK, screen_center};
+use super::{UNITS_PER_WHEEL_NOTCH, screen_center};
 
 /// How often the low-level hooks are torn down and reinstalled, to recover from
 /// Windows silently removing one. Short enough that a user notices at most a
@@ -418,7 +418,7 @@ fn convert_mouse(message: u32, info: &MSLLHOOKSTRUCT) {
             if notches != 0 {
                 emit(InputEvent::Scroll(ScrollDelta::new(
                     0,
-                    notches * PIXELS_PER_WHEEL_CLICK,
+                    notches * UNITS_PER_WHEEL_NOTCH,
                 )));
             }
         }
@@ -426,7 +426,7 @@ fn convert_mouse(message: u32, info: &MSLLHOOKSTRUCT) {
             let notches = wheel_delta(info);
             if notches != 0 {
                 emit(InputEvent::Scroll(ScrollDelta::new(
-                    notches * PIXELS_PER_WHEEL_CLICK,
+                    notches * UNITS_PER_WHEEL_NOTCH,
                     0,
                 )));
             }

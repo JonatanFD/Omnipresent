@@ -12,6 +12,7 @@
 pub mod keymap;
 
 use crate::port::{InputSink, InputSource};
+use crate::scroll::ScrollAccumulator;
 use evdev::uinput::VirtualDevice;
 use evdev::{AttributeSet, Device, EventSummary, EventType, RelativeAxisCode};
 use omni_protocol::InputEvent;
@@ -24,10 +25,10 @@ use std::sync::mpsc;
 /// any device with this name so we never re-capture our own injections.
 const VIRTUAL_DEVICE_NAME: &str = "omnipresent-virtual-input";
 
-/// How many protocol scroll pixels one evdev wheel click carries. Taken from the
-/// shared vocabulary so a notch here and a notch on the other machine are worth
-/// the same amount of scrolling.
-const PIXELS_PER_WHEEL_CLICK: i32 = omni_protocol::input::PIXELS_PER_WHEEL_NOTCH;
+/// How many protocol scroll units one evdev wheel click carries. A click is one
+/// line, taken from the shared vocabulary so that the machine receiving it
+/// decides how far a line scrolls, using its own settings.
+const UNITS_PER_WHEEL_CLICK: i32 = omni_protocol::input::MILLILINES_PER_LINE;
 
 /// Why a Linux input operation failed.
 #[derive(Debug)]
@@ -326,10 +327,10 @@ fn convert_event(
             }
             RelativeAxisCode::REL_WHEEL => Some(InputEvent::Scroll(ScrollDelta::new(
                 0,
-                value * PIXELS_PER_WHEEL_CLICK,
+                value * UNITS_PER_WHEEL_CLICK,
             ))),
             RelativeAxisCode::REL_HWHEEL => Some(InputEvent::Scroll(ScrollDelta::new(
-                value * PIXELS_PER_WHEEL_CLICK,
+                value * UNITS_PER_WHEEL_CLICK,
                 0,
             ))),
             _ => None,
@@ -415,10 +416,9 @@ fn held_modifiers(modifiers: &Arc<AtomicU8>) -> Modifiers {
 /// `InputSink`.
 pub struct LinuxSink {
     device: VirtualDevice,
-    /// Sub-click scroll remainders, so small pixel deltas accumulate into
-    /// wheel clicks instead of vanishing.
-    scroll_rem_x: i32,
-    scroll_rem_y: i32,
+    /// Turns the milli-lines that arrive into whole wheel clicks, holding back
+    /// what falls short of one so slow scrolling is not lost.
+    scroll: ScrollAccumulator,
 }
 
 impl std::fmt::Debug for LinuxSink {
@@ -456,8 +456,7 @@ impl LinuxSink {
 
         Ok(Self {
             device,
-            scroll_rem_x: 0,
-            scroll_rem_y: 0,
+            scroll: ScrollAccumulator::default(),
         })
     }
 
@@ -496,12 +495,9 @@ impl InputSink for LinuxSink {
                 self.emit(&[evdev::InputEvent::new(EventType::KEY.0, code, value)])
             }
             InputEvent::Scroll(delta) => {
-                self.scroll_rem_x += delta.dx;
-                self.scroll_rem_y += delta.dy;
-                let clicks_x = self.scroll_rem_x / PIXELS_PER_WHEEL_CLICK;
-                let clicks_y = self.scroll_rem_y / PIXELS_PER_WHEEL_CLICK;
-                self.scroll_rem_x -= clicks_x * PIXELS_PER_WHEEL_CLICK;
-                self.scroll_rem_y -= clicks_y * PIXELS_PER_WHEEL_CLICK;
+                // A click is one line; the desktop environment decides how far
+                // that scrolls, using this machine's own settings.
+                let (clicks_x, clicks_y) = self.scroll.take_lines(delta);
                 let mut events = Vec::new();
                 if clicks_y != 0 {
                     events.push(evdev::InputEvent::new(
