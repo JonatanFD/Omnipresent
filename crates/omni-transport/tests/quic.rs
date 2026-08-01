@@ -9,7 +9,8 @@ use omni_protocol::{
 };
 use omni_security::{LocalIdentity, generate_identity};
 use omni_transport::{
-    HandshakePolicy, PolicyViolation, QuicEndpoint, SecureChannel, Transport, TransportError,
+    HandshakePolicy, PolicyViolation, QuicConnection, QuicEndpoint, SecureChannel, Transport,
+    TransportError,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -160,36 +161,113 @@ async fn control_messages_ride_the_reliable_stream() {
     assert_eq!(target_stream.recv().await.unwrap(), None);
 }
 
-#[tokio::test]
-async fn a_large_clipboard_image_rides_the_control_stream() {
-    let alpha_id = generate_identity("alpha").unwrap();
-    let beta_id = generate_identity("beta").unwrap();
-    let alpha = endpoint(&alpha_id, AllowAll);
-    let beta = endpoint(&beta_id, AllowAll);
+/// The two endpoints of a live connection, already handshaken.
+async fn connected_pair(
+    alpha_id: &LocalIdentity,
+    beta_id: &LocalIdentity,
+) -> (QuicConnection, QuicConnection) {
+    let alpha = endpoint(alpha_id, AllowAll);
+    let beta = endpoint(beta_id, AllowAll);
     let beta_addr = beta.local_addr().unwrap();
 
     let (dialed, accepted) = tokio::join!(alpha.connect(beta_addr, "localhost"), async {
         beta.accept().await.expect("incoming connection")
     },);
-    let dialed = dialed.unwrap();
-    let accepted = accepted.unwrap();
+    (dialed.expect("connect"), accepted.expect("accept"))
+}
 
-    // A modest screenshot is already far larger than a control message: a
-    // 400x400 RGBA image is 640 000 bytes, well past the old 64 KiB frame cap.
-    let width = 400u32;
-    let height = 400u32;
-    let bytes = vec![0xAB; (width * height * 4) as usize];
-    let clipboard = Message::Clipboard(ClipboardData::Image(ClipboardImage {
+/// A screenshot-sized clipboard payload: 1920x1080 in RGBA is about 8 MB, big
+/// enough that writing it is not instant.
+fn a_screenshot() -> Message {
+    let width = 1920u32;
+    let height = 1080u32;
+    Message::Clipboard(ClipboardData::Image(ClipboardImage {
         width,
         height,
-        bytes,
-    }));
+        bytes: vec![0xAB; (width * height * 4) as usize],
+    }))
+}
+
+#[tokio::test]
+async fn a_bulk_payload_arrives_on_its_own_stream() {
+    let alpha_id = generate_identity("alpha").unwrap();
+    let beta_id = generate_identity("beta").unwrap();
+    let (dialed, mut accepted) = connected_pair(&alpha_id, &beta_id).await;
+
+    let clipboard = a_screenshot();
+    dialed
+        .bulk_sender()
+        .send(&clipboard)
+        .await
+        .expect("send bulk payload");
+
+    let mut bulk = accepted
+        .take_bulk_receiver()
+        .expect("the bulk receiver is available once");
+    assert_eq!(bulk.recv().await, Some(clipboard));
+}
+
+#[tokio::test]
+async fn signalling_is_not_stuck_behind_a_bulk_transfer() {
+    let alpha_id = generate_identity("alpha").unwrap();
+    let beta_id = generate_identity("beta").unwrap();
+    let (dialed, accepted) = connected_pair(&alpha_id, &beta_id).await;
 
     let mut initiator_stream = dialed.open_control().await.expect("open control");
-    initiator_stream.send(&clipboard).await.expect("send image");
+
+    // A heartbeat leaves right after a big clipboard payload does. This is the
+    // shape that used to drop sessions: sharing one stream put the heartbeat
+    // behind the whole image, and the peer gave up waiting for it.
+    let sender = dialed.bulk_sender();
+    let image = tokio::spawn(async move { sender.send(&a_screenshot()).await });
+    let heartbeat = Message::Control(ControlMessage::Heartbeat {
+        session: SessionId::new(1),
+    });
+    initiator_stream
+        .send(&heartbeat)
+        .await
+        .expect("send heartbeat");
+
+    // The receiver reads only signalling — it never touches the bulk stream.
+    // What comes off the control stream must be the heartbeat, not the image
+    // that was sent first, and it must not have to wait for it either.
+    let mut target_stream = accepted.accept_control().await.expect("accept control");
+    let received = tokio::time::timeout(Duration::from_secs(5), target_stream.recv())
+        .await
+        .expect("heartbeat did not arrive while the image was being sent")
+        .expect("read control stream");
+    assert_eq!(received, Some(heartbeat));
+
+    image.await.unwrap().expect("the image still went out");
+}
+
+#[tokio::test]
+async fn the_control_stream_refuses_a_frame_too_big_for_signalling() {
+    let alpha_id = generate_identity("alpha").unwrap();
+    let beta_id = generate_identity("beta").unwrap();
+    let (dialed, accepted) = connected_pair(&alpha_id, &beta_id).await;
+
+    let mut initiator_stream = dialed.open_control().await.expect("open control");
+
+    // Signalling is tiny. Anything image-sized belongs on a bulk stream, where
+    // it cannot delay a heartbeat — so the control stream turns it away rather
+    // than quietly growing to fit. Small enough here that the write itself
+    // completes: what is under test is the refusal, not a stalled sender.
+    let too_big = Message::Clipboard(ClipboardData::Image(ClipboardImage {
+        width: 200,
+        height: 100,
+        bytes: vec![0xAB; 200 * 100 * 4],
+    }));
+    initiator_stream
+        .send(&too_big)
+        .await
+        .expect("the sender writes it; the receiver is what refuses it");
 
     let mut target_stream = accepted.accept_control().await.expect("accept control");
-    assert_eq!(target_stream.recv().await.unwrap(), Some(clipboard));
+    assert!(
+        target_stream.recv().await.is_err(),
+        "an image-sized frame was accepted as signalling"
+    );
 }
 
 #[tokio::test]

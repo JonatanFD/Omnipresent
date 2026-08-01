@@ -5,7 +5,25 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-07-30 (a **cross-platform audit** and its fixes: display
+_Last updated: 2026-08-01 (**copying a big image no longer drops the
+connection.** Clipboard payloads shared the reliable control stream with
+signalling, and the peer task wrote them itself — so while a screenshot's
+several megabytes went out, that task ran nothing else: it sent no heartbeat,
+read none from the peer, and refreshed no deadline. After eight seconds each
+side concluded the other had died and tore the session down, which is exactly
+what a user saw on copying a large image. The receiver had the same problem,
+reading the whole frame inline. Bulk payloads now travel on **their own QUIC
+stream**, one per transfer, written and read by tasks of their own: the peer
+loop never waits on a large payload in either direction, so heartbeats keep
+flowing however big the copy is. Sending is sequential per peer, so a newer copy
+cannot overtake an older one still in flight. With signalling no longer sharing
+the stream, its frame limit drops back to 64 KiB — it had been inflated to 64
+MiB purely to let clipboard through — and the bulk stream carries its own limit.
+The size caps themselves were reviewed and left alone: they were never the
+cause, and an oversized payload was already skipped with a warning rather than
+breaking anything.
+
+Earlier: a **cross-platform audit** and its fixes: display
 geometry, modifier keys, local IPC, input, packaging, and the **Windows GUI**
 brought to layout parity with the macOS app.
 
@@ -221,8 +239,8 @@ and `cargo test` (98 tests), including on Windows.
 | `omni-session`   | **Implemented** | Session lifecycle, dynamic roles, active-target routing, `SessionEvents` port. 12 tests. |
 | `omni-input`     | **Implemented** | Ports, in-memory adapters, permission diagnostics, and the real OS adapters: macOS (CGEvent tap + post; the sink warps the cursor so a remote-driven move stays visible and stamps the click-count so double/triple clicks register), Linux (evdev + uinput), and Windows (low-level hooks + SendInput; the local cursor is parked, not hidden). Cursor **hiding** on suppression where it is safe and self-restoring (macOS `CGDisplayHideCursor`, Linux X11 empty-cursor on the root window) and true Linux cursor-position query (`XQueryPointer`). 17 tests. |
 | `omni-clipboard` | **Implemented** | Opt-in clipboard sharing (text + images) over a ports-and-adapters design: `arboard` adapter, in-memory mock, echo-loop guard, strict opt-in toggle queryable at runtime. 8 tests. |
-| `omni-transport` | **Implemented** | `SecureChannel` port, framing, loopback channel, and the real QUIC adapter (quinn + rustls, mTLS, TOFU verifiers, datagrams + control stream). The control-frame limit admits a full clipboard payload so images sync over the reliable stream. The input path is tuned for latency: a shallow datagram send buffer (drops oldest stale positions) and the BBR congestion controller. 13 tests. |
-| `omni-runtime`   | **Implemented** | The daemon: config/paths, persistent identity, trust store, rate limiter, cross-platform IPC (Unix socket / Windows named pipe), heartbeats, configurable layout, opt-in clipboard sync over the control stream (toggleable at runtime and persisted), doctor checks, and the composition root that runs the pipelines. The peer task coalesces a backlog of queued cursor positions to the latest one (keeping clicks/keys/scrolls intact) so a congested link does not make the cursor lag. A live IPC event channel (`Subscribe` → `Event` snapshots, push not poll) and a protocol-version handshake (`Hello`) back native GUI clients. 28 tests + two integration tests. |
+| `omni-transport` | **Implemented** | `SecureChannel` port, framing, loopback channel, and the real QUIC adapter (quinn + rustls, mTLS, TOFU verifiers, datagrams, control stream, and a bulk stream per clipboard transfer so a large payload cannot delay the heartbeats that keep a session alive). The input path is tuned for latency: a shallow datagram send buffer (drops oldest stale positions) and the BBR congestion controller. 15 tests. |
+| `omni-runtime`   | **Implemented** | The daemon: config/paths, persistent identity, trust store, rate limiter, cross-platform IPC (Unix socket / Windows named pipe), heartbeats, configurable layout, opt-in clipboard sync on its own bulk stream, handed to a per-peer sender task so the loop that keeps the session alive never waits on a large write (toggleable at runtime and persisted), doctor checks, and the composition root that runs the pipelines. The peer task coalesces a backlog of queued cursor positions to the latest one (keeping clicks/keys/scrolls intact) so a congested link does not make the cursor lag. A live IPC event channel (`Subscribe` → `Event` snapshots, push not poll) and a protocol-version handshake (`Hello`) back native GUI clients. 35 tests + two integration tests. |
 | `omni-cli`       | **Implemented** | The full `omni` binary: start/stop/status, doctor, connect/disconnect, accept/reject, peers (+ remove), layout, clipboard on/off, uninstall, over the daemon's Unix socket. |
 
 ### What `omni-protocol` provides
@@ -338,7 +356,10 @@ and `cargo test` (98 tests), including on Windows.
   Mutual TLS 1.3 is mandatory; custom rustls certificate verifiers enforce the
   `HandshakePolicy` port (implemented by the Runtime over Security's trust store),
   so an unauthorized or fingerprint-changed peer never completes the handshake.
-  Exercised by live two-endpoint tests over localhost.
+  `BulkSender`/`BulkReceiver` carry clipboard-sized payloads on a QUIC stream of
+  their own, one per transfer, so a large one cannot delay the heartbeats that
+  keep a session alive — nor the next transfer. Signalling and bulk each have
+  their own frame limit. Exercised by live two-endpoint tests over localhost.
 
 ### What `omni-runtime` provides
 
