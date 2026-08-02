@@ -18,7 +18,7 @@ use super::{WindowsInputError, keymap};
 use crate::port::InputSink;
 use crate::scroll::ScrollAccumulator;
 use omni_protocol::InputEvent;
-use omni_protocol::input::{Action, Modifiers, MouseButton, ScrollDelta};
+use omni_protocol::input::{Action, MILLILINES_PER_LINE, Modifiers, MouseButton, ScrollDelta};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
     KEYEVENTF_KEYUP, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
@@ -82,8 +82,9 @@ pub(super) fn reconcile(held: Modifiers, wanted: Modifiers) -> Vec<ModifierFix> 
 /// Injects remote input into the local OS. The production `InputSink`.
 #[derive(Debug, Default)]
 pub struct WindowsSink {
-    /// Turns the milli-lines that arrive into whole wheel notches, holding back
-    /// what falls short of one so slow scrolling is not lost.
+    /// Turns the milli-lines that arrive into the wheel movement Windows takes,
+    /// holding back what falls short of its smallest step so slow scrolling is
+    /// not lost.
     scroll: ScrollAccumulator,
     /// The modifiers this sink believes are down, from what it has injected. Kept
     /// in step with the controller's view so a lost datagram cannot strand one.
@@ -204,15 +205,26 @@ impl WindowsSink {
     }
 
     fn inject_scroll(&mut self, delta: ScrollDelta) -> Result<(), WindowsInputError> {
-        // A notch is one line. Windows scales it by the user's "lines to scroll
-        // per notch" setting when the application reads the event, so how far
-        // this actually scrolls is decided here, not by the machine that sent it.
-        let (notches_x, notches_y) = self.scroll.take_lines(delta);
-        if notches_y != 0 {
-            self.inject_mouse(MOUSEEVENTF_WHEEL, notches_y * WHEEL_DELTA as i32, 0, 0)?;
+        // The wire carries a distance in lines. Windows does not take a distance:
+        // it takes wheel movement, and multiplies it by *this* machine's "lines
+        // to scroll per notch" as the application reads the event. So the
+        // setting is divided out here, and Windows puts it straight back — which
+        // leaves the application scrolling the distance that was asked for.
+        //
+        // Sending whole notches instead let that multiplication stand
+        // unopposed, so everything arriving here scrolled several times too far.
+        let (chars_per_notch, lines_per_notch) = super::wheel_scroll_amounts();
+        let (wheel_x, wheel_y) = self.scroll.take_scaled(
+            delta,
+            WHEEL_DELTA as i32,
+            MILLILINES_PER_LINE.saturating_mul(chars_per_notch),
+            MILLILINES_PER_LINE.saturating_mul(lines_per_notch),
+        );
+        if wheel_y != 0 {
+            self.inject_mouse(MOUSEEVENTF_WHEEL, wheel_y, 0, 0)?;
         }
-        if notches_x != 0 {
-            self.inject_mouse(MOUSEEVENTF_HWHEEL, notches_x * WHEEL_DELTA as i32, 0, 0)?;
+        if wheel_x != 0 {
+            self.inject_mouse(MOUSEEVENTF_HWHEEL, wheel_x, 0, 0)?;
         }
         Ok(())
     }

@@ -44,6 +44,15 @@ pub enum ControlMessage {
     /// Place the cursor at an absolute position on the receiver's screen —
     /// sent on edge crossings so the cursor appears exactly where it entered.
     /// Reliable (control stream), unlike the relative motion datagrams.
+    ///
+    /// It is also how control changes hands. The sender only ever sends this
+    /// when its own cursor has just crossed onto the receiver, which is the same
+    /// moment it starts sending input — so receiving one means "I am driving you
+    /// now". A receiver that was itself driving a machine gives that up, leaving
+    /// exactly one of the two in control. Without that, both ends could believe
+    /// they were the controller at once and each would withhold input from its
+    /// own desktop while sending it to the other, so neither would act on
+    /// anything.
     CursorWarp { session: SessionId, x: i32, y: i32 },
     /// Keep-alive so each side can detect a silently dropped peer.
     Heartbeat { session: SessionId },
