@@ -1099,6 +1099,9 @@ async fn run_peer(
                     Ok(Some(Message::Control(ControlMessage::Disconnect { .. }))) | Ok(None) => break,
                     Ok(Some(Message::Control(ControlMessage::CursorWarp { session: claimed, x, y }))) => {
                         if claimed == session {
+                            // The peer's cursor has just crossed onto this
+                            // machine, so it is the one in control now.
+                            yield_control_to_peer(&shared);
                             warp(&shared, x, y);
                         }
                     }
@@ -1174,6 +1177,33 @@ fn inject(shared: &Shared, event: InputEvent) {
         && let Err(e) = sink.inject(event)
     {
         tracing::warn!(%e, "could not inject input");
+    }
+}
+
+/// Hands control of this machine to the peer that just crossed onto it: input
+/// goes back to the local screen and the local keyboard and mouse are released.
+///
+/// Either machine's user can push their cursor across at any moment, and each
+/// one decides that for itself. If both did so, each would send its input to the
+/// other and withhold it from its own desktop, so neither would act on what it
+/// received — which looked like a machine that could be moved around but not
+/// clicked or typed on. Giving way to whoever crossed last settles it: the user
+/// who reached for their mouse is the one driving.
+fn yield_control_to_peer(shared: &Arc<Shared>) {
+    let gave_way = {
+        let mut state = shared.lock();
+        let gave_way = state.sessions.yield_control();
+        if gave_way {
+            // The cursor is wherever the peer is about to put it; adopt that on
+            // the next local movement rather than the stale tracked position.
+            state.cursor = CursorState::new(shared.local_machine, Point::new(0, 0));
+            shared.sync_suppression(&state);
+        }
+        gave_way
+    };
+    if gave_way {
+        tracing::info!("a peer took control; input is back on the local screen");
+        notify_change(shared);
     }
 }
 

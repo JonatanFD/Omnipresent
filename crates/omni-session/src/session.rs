@@ -179,6 +179,21 @@ impl<E: SessionEvents> SessionManager<E> {
         Ok(role)
     }
 
+    /// Brings input back to the local screen because a peer has taken control of
+    /// this machine. Returns whether anything changed.
+    ///
+    /// Two machines may each hold a session with the other, and either one's
+    /// user can push their cursor across at any moment. Without this, both ends
+    /// could believe they were driving the other at the same time: each would
+    /// send its input away and withhold it from its own desktop, so neither
+    /// would act on what the other sent. The machine being taken over gives up
+    /// what it was driving, which leaves exactly one of them in control.
+    pub fn yield_control(&mut self) -> bool {
+        let changed = self.active != ActiveTarget::Local;
+        self.set_active(ActiveTarget::Local);
+        changed
+    }
+
     /// Reacts to a cursor crossing reported by Topology, switching where input is
     /// routed. Crossing back onto this machine routes input locally; crossing
     /// onto a peer routes it there (the peer must have a session).
@@ -345,6 +360,45 @@ mod tests {
                 SessionEvent::Closed { id: S1 },
             ],
         );
+    }
+
+    #[test]
+    fn a_peer_taking_over_brings_input_back_home() {
+        let mut mgr = manager();
+        mgr.establish(S1, PEER_A, Role::Controller).unwrap();
+        mgr.handle_crossing(crossing(PEER_A)).unwrap();
+
+        assert!(mgr.yield_control());
+
+        // Both machines believed they were driving the other, which left each
+        // withholding input from its own desktop. Giving way settles it.
+        assert_eq!(mgr.active_target(), ActiveTarget::Local);
+        assert_eq!(
+            mgr.events().events().last(),
+            Some(&SessionEvent::ActiveTargetChanged {
+                target: ActiveTarget::Local,
+            }),
+        );
+    }
+
+    #[test]
+    fn yielding_when_input_is_already_home_changes_nothing() {
+        let mut mgr = manager();
+        mgr.establish(S1, PEER_A, Role::Controller).unwrap();
+        let before = mgr.events().events().len();
+
+        assert!(!mgr.yield_control());
+
+        assert_eq!(mgr.active_target(), ActiveTarget::Local);
+        assert_eq!(mgr.events().events().len(), before);
+    }
+
+    #[test]
+    fn a_machine_with_no_sessions_can_still_be_asked_to_yield() {
+        // A peer's message can arrive as the last session is going away.
+        let mut mgr = manager();
+        assert!(!mgr.yield_control());
+        assert_eq!(mgr.active_target(), ActiveTarget::Local);
     }
 
     #[test]
