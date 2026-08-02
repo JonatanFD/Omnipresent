@@ -194,6 +194,24 @@ impl<E: SessionEvents> SessionManager<E> {
         changed
     }
 
+    /// Sends this machine's input to `peer`, which has just taken the cursor
+    /// back onto its own screen.
+    ///
+    /// The counterpart of [`yield_control`](Self::yield_control), and the other
+    /// half of a hand-over. Giving way when a peer crosses onto this machine is
+    /// only half the story: when the cursor leaves again, this machine has to
+    /// hear about it too. Otherwise its keyboard goes on typing on its own
+    /// desktop while the cursor — and the user's attention — sit on the peer.
+    /// Whoever holds the cursor is where every keyboard and mouse should be
+    /// working, whichever machine they happen to be plugged into.
+    pub fn follow_peer(&mut self, peer: MachineId) -> Result<(), SessionError> {
+        if !self.by_peer.contains_key(&peer) {
+            return Err(SessionError::NoSessionForPeer(peer));
+        }
+        self.set_active(ActiveTarget::Remote(peer));
+        Ok(())
+    }
+
     /// Reacts to a cursor crossing reported by Topology, switching where input is
     /// routed. Crossing back onto this machine routes input locally; crossing
     /// onto a peer routes it there (the peer must have a session).
@@ -379,6 +397,53 @@ mod tests {
                 target: ActiveTarget::Local,
             }),
         );
+    }
+
+    #[test]
+    fn following_the_peer_that_took_the_cursor_back_sends_input_there() {
+        let mut mgr = manager();
+        mgr.establish(S1, PEER_A, Role::Target).unwrap();
+
+        // The peer was driving this machine and has just pulled the cursor back
+        // onto its own screen, so this machine's keyboard belongs to it now.
+        mgr.follow_peer(PEER_A).unwrap();
+
+        assert_eq!(mgr.active_target(), ActiveTarget::Remote(PEER_A));
+        assert_eq!(
+            mgr.events().events().last(),
+            Some(&SessionEvent::ActiveTargetChanged {
+                target: ActiveTarget::Remote(PEER_A),
+            }),
+        );
+    }
+
+    #[test]
+    fn following_a_peer_we_have_no_session_with_fails_and_keeps_input_home() {
+        let mut mgr = manager();
+
+        assert_eq!(
+            mgr.follow_peer(PEER_B),
+            Err(SessionError::NoSessionForPeer(PEER_B)),
+        );
+        assert_eq!(mgr.active_target(), ActiveTarget::Local);
+    }
+
+    #[test]
+    fn control_travels_back_and_forth_with_only_one_end_driving() {
+        // The full round trip between two machines: this one crosses onto the
+        // peer, the peer takes over, the peer hands the cursor back. At no point
+        // do both ends believe they are driving.
+        let mut mgr = manager();
+        mgr.establish(S1, PEER_A, Role::Controller).unwrap();
+
+        mgr.handle_crossing(crossing(PEER_A)).unwrap();
+        assert_eq!(mgr.active_target(), ActiveTarget::Remote(PEER_A));
+
+        mgr.yield_control();
+        assert_eq!(mgr.active_target(), ActiveTarget::Local);
+
+        mgr.follow_peer(PEER_A).unwrap();
+        assert_eq!(mgr.active_target(), ActiveTarget::Remote(PEER_A));
     }
 
     #[test]
