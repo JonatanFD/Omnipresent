@@ -56,6 +56,28 @@ pub enum ControlMessage {
     CursorWarp { session: SessionId, x: i32, y: i32 },
     /// Keep-alive so each side can detect a silently dropped peer.
     Heartbeat { session: SessionId },
+    /// "The cursor is back on my screen, at this position on it."
+    ///
+    /// The other half of the hand-over. [`ControlMessage::CursorWarp`] says
+    /// *you* have the cursor now; this says *I* do, and it is sent at the moment
+    /// the sender's cursor crosses back onto its own screen. Whoever holds the
+    /// cursor is the machine every keyboard and mouse should be typing and
+    /// moving on, so a receiver points its own input at the sender instead of at
+    /// its local desktop.
+    ///
+    /// Without it only half the hand-over ever travelled: a machine learned when
+    /// it had been taken over but never when the cursor had left again, so its
+    /// keyboard stayed on its own desktop while the cursor sat on the other
+    /// machine — typing landed on the wrong computer.
+    ///
+    /// The position is where the cursor landed on the *sender's* screen, so the
+    /// receiver keeps tracking the one shared cursor from where it really is.
+    ///
+    /// New variants belong at the end: postcard encodes a variant as its
+    /// position in this list, so inserting one in the middle would renumber the
+    /// messages above it and a peer on an older version would misread every one
+    /// of them.
+    CursorReturned { session: SessionId, x: i32, y: i32 },
 }
 
 /// Why a [`ControlMessage::ConnectRequest`] was refused.
@@ -94,6 +116,25 @@ mod tests {
                 assert_eq!(screen, ScreenSize::new(1920, 1080));
             }
             _ => panic!("expected a connect request"),
+        }
+    }
+
+    #[test]
+    fn a_returned_cursor_says_where_it_landed_on_the_sender() {
+        // The receiver needs the position to keep tracking the one cursor from
+        // where it actually is, on the screen that now holds it.
+        let msg = ControlMessage::CursorReturned {
+            session: SessionId::new(7),
+            x: 120,
+            y: 640,
+        };
+
+        match msg {
+            ControlMessage::CursorReturned { session, x, y } => {
+                assert_eq!(session, SessionId::new(7));
+                assert_eq!((x, y), (120, 640));
+            }
+            _ => panic!("expected a returned cursor"),
         }
     }
 

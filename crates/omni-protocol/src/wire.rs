@@ -119,6 +119,21 @@ mod tests {
     }
 
     #[test]
+    fn both_hand_over_messages_round_trip() {
+        // The two directions control travels in: onto the peer, and back home.
+        round_trip(Message::Control(ControlMessage::CursorWarp {
+            session: SessionId::new(4),
+            x: 0,
+            y: 1079,
+        }));
+        round_trip(Message::Control(ControlMessage::CursorReturned {
+            session: SessionId::new(4),
+            x: 2559,
+            y: -12,
+        }));
+    }
+
+    #[test]
     fn truncated_input_is_rejected() {
         let bytes = encode(&Message::Control(ControlMessage::Disconnect {
             session: SessionId::new(5),

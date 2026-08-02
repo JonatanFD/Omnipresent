@@ -5,8 +5,40 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-08-02 (**control now works in both directions, and
-scrolling runs at each machine's own speed.**
+_Last updated: 2026-08-02 (**the keyboard now follows the cursor onto the other
+machine.**
+
+There is one cursor, and whichever machine it is sitting on is the machine every
+keyboard and mouse should be working on — whichever computer they happen to be
+plugged into. Half of that was true: a machine learned when it had been taken
+over, so it stopped sending its keystrokes away and took them back to its own
+screen. Nothing ever told it the cursor had left again. So after the cursor came
+back to the Mac, the PC's keyboard went on typing on the PC — the pointer was on
+one machine and the letters appeared on the other.
+
+Both halves of a hand-over now travel. A `CursorWarp` already said *you* have the
+cursor; a `CursorReturned` says *I* do, and it is sent the moment a cursor crosses
+back onto its own machine's screen. A machine that receives one points its input
+at the sender (`SessionManager::follow_peer`) instead of at its own desktop, and
+adopts the position the message carries, so the one shared cursor goes on being
+tracked from where it actually is. Exactly one machine holds the cursor at any
+moment, and every keyboard in the room types on it.
+
+The version before had made control reversible for the mouse, which is what
+turned this up: until then whoever crossed first stayed in control for good, so
+the keyboard was never left behind. Both machines need this version — a peer on
+an older one cannot answer a message it does not know.
+
+One rough edge remains, and it is not new: a machine that is *not* holding the
+cursor still keeps its own copy of where that cursor is, and only hears about it
+at a hand-over. Move the Mac's mouse around the Mac for a while and then reach
+for the PC's mouse, and the pointer jumps once to where the PC last knew it
+before carrying on normally. Making the machine that holds the cursor the only
+one that tracks it — with the others sending plain movement rather than
+positions — is the fix, and it is on the list below.
+
+Earlier the same day: **control began working in both directions, and
+scrolling at each machine's own speed.**
 
 Whichever machine's mouse the user reaches for is the one that drives. That was
 the intent all along — both ends capture, and either one's cursor can cross onto
@@ -301,10 +333,10 @@ and `cargo test` (189 tests), including on Windows.
 
 | Crate            | Status        | What's there                                                                 |
 | ---------------- | ------------- | ---------------------------------------------------------------------------- |
-| `omni-protocol`  | **Implemented** | Ids, input events, control messages (incl. screen sizes and `CursorWarp`), clipboard payloads (`ClipboardData`/`ClipboardImage`, size-capped + overflow-checked), and the postcard wire codec. Scrolling is measured in lines, not pixels, so the machine receiving it sets the speed. 34 tests. |
+| `omni-protocol`  | **Implemented** | Ids, input events, control messages (incl. screen sizes and the `CursorWarp`/`CursorReturned` handover pair), clipboard payloads (`ClipboardData`/`ClipboardImage`, size-capped + overflow-checked), and the postcard wire codec. Scrolling is measured in lines, not pixels, so the machine receiving it sets the speed. 36 tests. |
 | `omni-topology`  | **Implemented** | Virtual desktop layout, edge crossings, and the `LayoutStore` port. 13 tests. |
 | `omni-security`  | **Implemented** | Allowlist + TOFU trust policy, `TrustStore`/`CertProvider` ports, self-signed identity generation. 15 tests. |
-| `omni-session`   | **Implemented** | Session lifecycle, dynamic roles, active-target routing, `SessionEvents` port. `yield_control` gives way when a peer takes over, so the two ends can never both believe they are driving. 15 tests. |
+| `omni-session`   | **Implemented** | Session lifecycle, dynamic roles, active-target routing, `SessionEvents` port. `yield_control` gives way when a peer takes over and `follow_peer` sends this machine's input after a cursor that has gone back to the peer — the two halves that keep exactly one machine holding the cursor, and every keyboard pointed at it. 18 tests. |
 | `omni-input`     | **Implemented** | Ports, in-memory adapters, permission diagnostics, and the real OS adapters: macOS (CGEvent tap + post; the sink warps the cursor so a remote-driven move stays visible and stamps the click-count so double/triple clicks register), Linux (evdev + uinput), and Windows (low-level hooks + SendInput; the local cursor is parked, not hidden). Cursor **hiding** on suppression where it is safe and self-restoring (macOS `CGDisplayHideCursor`, Linux X11 empty-cursor on the root window) and true Linux cursor-position query (`XQueryPointer`). A shared `ScrollAccumulator`, over the `Scaled` fraction-carrying primitive, converts the wire's lines into each OS's own scroll unit and back — on Windows through that machine's own "lines to scroll per notch", so a fraction of a notch is never floored away and the setting is applied exactly once. The Windows hooks leave injected events alone in both respects, so a peer driving this machine is not swallowed by its own suppression. 46 tests. |
 | `omni-clipboard` | **Implemented** | Opt-in clipboard sharing (text + images) over a ports-and-adapters design: `arboard` adapter, in-memory mock, echo-loop guard, strict opt-in toggle queryable at runtime. 8 tests. |
 | `omni-transport` | **Implemented** | `SecureChannel` port, framing, loopback channel, and the real QUIC adapter (quinn + rustls, mTLS, TOFU verifiers, datagrams, control stream, and a bulk stream per clipboard transfer so a large payload cannot delay the heartbeats that keep a session alive). The input path is tuned for latency: a shallow datagram send buffer (drops oldest stale positions) and the BBR congestion controller. 15 tests. |
@@ -322,10 +354,12 @@ and `cargo test` (189 tests), including on Windows.
   applies its own scrolling speed and a trackpad's fractions are not rounded
   away).
 - **Control messages** (`control`): `ControlMessage` (`ConnectRequest`, `Accept`,
-  `Reject`, `Disconnect`, `Heartbeat`, `CursorWarp`) and `RejectReason`. A
-  `CursorWarp` is sent only when the sender's cursor has just crossed onto the
-  receiver, so it doubles as the handover of control: receiving one means the
-  peer is driving now.
+  `Reject`, `Disconnect`, `Heartbeat`, `CursorWarp`, `CursorReturned`) and
+  `RejectReason`. The last two are the two halves of a handover, each sent only
+  at the moment a cursor crosses: `CursorWarp` means "you have the cursor now",
+  `CursorReturned` means "I do, and here is where it landed on my screen". Either
+  one tells the receiver where to send its keyboard and mouse. New variants go at
+  the end of the enum, because postcard encodes one as its position in the list.
 - **Wire codec** (`wire`): the `Message` envelope (`Input`, `Control`,
   `Clipboard`) plus `encode`/`decode` over
   [postcard](https://docs.rs/postcard) — a compact varint binary format chosen
@@ -371,8 +405,10 @@ and `cargo test` (189 tests), including on Windows.
   establishes and closes sessions, reverses roles, and switches the active target
   in response to Topology `Crossing`s (crossing onto a peer routes input there;
   crossing back home routes it local). `yield_control` brings input home because
-  a peer has taken over, which is what keeps control in one place when both
-  machines' users reach for their mouse. Target-change events are deduplicated.
+  a peer has taken over, and `follow_peer` sends input to a peer that has taken
+  the cursor back onto its own screen — the two halves of a handover, which is
+  what keeps control in one place and every keyboard aimed at the machine
+  holding the cursor. Target-change events are deduplicated.
 - **Events** (`events`): the `SessionEvents` port (lifecycle, role, and
   active-target changes) plus a recording adapter for tests.
 
@@ -483,11 +519,14 @@ and `cargo test` (189 tests), including on Windows.
   uinput access on Linux) plus screen-size and state-directory checks.
 - **The daemon** (`daemon`): the composition root. A capture thread polls the
   OS input source and advances the virtual cursor through Topology; an edge
-  crossing flips Session's active target, suppresses local input, and warps
-  the peer's cursor to the entry point. A warp arriving the other way means the
-  peer's cursor has crossed onto *this* machine, so the daemon gives up whatever
-  it was driving and takes its input back to the local screen — control belongs
-  to whichever user moved last. While a remote peer is active, pointer
+  crossing flips Session's active target, suppresses local input, and tells the
+  peers: a cursor crossing *onto* a peer warps that peer's cursor to the entry
+  point, and a cursor crossing back home tells every peer where it landed. The
+  same two messages arriving the other way move this machine's input with the
+  cursor — giving up whatever it was driving when a peer's cursor lands here,
+  and following a peer that has taken the cursor back. Control belongs to
+  whichever user moved last, and every keyboard types on the machine holding
+  the cursor. While a remote peer is active, pointer
   motion travels as the cursor's **absolute position on the peer's screen**
   (mapped through the virtual desktop using both machines' sizes), not raw
   relative deltas — so the two cursors cannot drift apart and control stays
@@ -545,13 +584,23 @@ against ports using in-memory adapters.
 Everything below is known, deliberate, and ordered roughly by importance:
 
 - **Control in both directions has not been run on two live machines yet.** The
-  hook fix and the handover are in place and the arithmetic and the session rule
-  are unit-tested, but the failure they address only appears on real hardware:
-  what proves it is pushing a Mac's cursor onto a PC and being able to click and
-  type there, then pushing the PC's cursor back and finding it still works. The
-  same goes for the Windows scrolling fixes — in particular that a precision
-  touchpad scrolls at all, and that one wheel notch moves the same distance on
-  both machines.
+  hook fix and both halves of the handover are in place and the arithmetic and
+  the session rules are unit-tested, but the failures they address only appear on
+  real hardware: what proves it is pushing a Mac's cursor onto a PC and being
+  able to click and type there, then pushing the PC's cursor back and finding
+  that the PC's keyboard now types on the Mac. The same goes for the Windows
+  scrolling fixes — in particular that a precision touchpad scrolls at all, and
+  that one wheel notch moves the same distance on both machines. Both machines
+  must run the same version: an older peer cannot answer a message it does not
+  know.
+- **Only the machine holding the cursor should track it.** Every machine keeps
+  its own copy of where the cursor is, and a machine that is not holding it hears
+  the truth only at a handover. Move one machine's mouse around its own screen
+  for a while and then reach for the other machine's mouse, and the pointer jumps
+  once to where that machine last knew it before carrying on. The fix is to make
+  the holder the single authority — the others send plain movement and let the
+  holder decide where the cursor ends up and when it crosses — which also removes
+  the second copy of the crossing arithmetic.
 - **Display changes need a restart.** The desktop's geometry is read once at
   startup and the size is announced to a peer only when the session is
   established. Docking, unplugging a monitor, or changing the scaling therefore
