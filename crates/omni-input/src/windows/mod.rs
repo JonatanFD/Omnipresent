@@ -31,14 +31,56 @@ use windows_sys::Win32::UI::HiDpi::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN,
-    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SetWindowsHookExW,
-    UnhookWindowsHookEx, WH_MOUSE_LL,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SPI_GETWHEELSCROLLCHARS,
+    SPI_GETWHEELSCROLLLINES, SetWindowsHookExW, SystemParametersInfoW, UnhookWindowsHookEx,
+    WH_MOUSE_LL,
 };
 
-/// How many protocol scroll units one Windows wheel notch carries. A notch is
-/// one line, taken from the shared vocabulary so that the machine receiving it
-/// decides how far a line scrolls, using its own settings.
-pub(crate) const UNITS_PER_WHEEL_NOTCH: i32 = omni_protocol::input::MILLILINES_PER_LINE;
+/// What Windows falls back to when it cannot say how far one wheel notch should
+/// scroll: its own out-of-the-box setting.
+pub(crate) const DEFAULT_LINES_PER_NOTCH: i32 = 3;
+
+/// The largest per-notch amount that is taken at face value.
+///
+/// The setting is a `u32`, and `WHEEL_PAGESCROLL` (`u32::MAX`) means "a whole
+/// page per notch" — a distance in lines that nothing here can know. Anything
+/// beyond this, that value included, falls back to the default rather than
+/// turning one notch into a scroll of absurd length.
+const MAX_LINES_PER_NOTCH: u32 = 100;
+
+/// How far one wheel notch scrolls on this machine, as its owner set it:
+/// `(characters horizontally, lines vertically)`.
+///
+/// This is the setting that decides scrolling speed on Windows. It belongs to
+/// *this* machine, so it is applied on the way out when capturing (a notch here
+/// means this many lines) and divided back out when injecting (Windows applies
+/// it again as the event reaches the application). Without that, a notch
+/// travelling between two machines is scaled by it once too often or not at all.
+pub(crate) fn wheel_scroll_amounts() -> (i32, i32) {
+    (
+        system_scroll_amount(SPI_GETWHEELSCROLLCHARS),
+        system_scroll_amount(SPI_GETWHEELSCROLLLINES),
+    )
+}
+
+/// Reads one of the two wheel settings, falling back to the Windows default
+/// when it is missing or means something other than a number of lines.
+fn system_scroll_amount(action: u32) -> i32 {
+    let mut amount: u32 = 0;
+    let read = unsafe {
+        SystemParametersInfoW(
+            action,
+            0,
+            (&raw mut amount).cast(),
+            // Reading only: nothing to write back and nobody to notify.
+            0,
+        )
+    };
+    if read == 0 || amount == 0 || amount > MAX_LINES_PER_NOTCH {
+        return DEFAULT_LINES_PER_NOTCH;
+    }
+    amount as i32
+}
 
 /// Why a Windows input operation failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +258,22 @@ mod tests {
         // and the daemon sets it again. The second call is a no-op, not a panic.
         prepare_process();
         prepare_process();
+    }
+
+    #[test]
+    fn the_wheel_settings_are_always_a_usable_number_of_lines() {
+        // Whatever the machine answers — including the "one page per notch"
+        // setting, which is not a line count at all — the scroll arithmetic
+        // needs a positive number it can divide by.
+        let (chars, lines) = wheel_scroll_amounts();
+        assert!(chars > 0 && chars as u32 <= MAX_LINES_PER_NOTCH);
+        assert!(lines > 0 && lines as u32 <= MAX_LINES_PER_NOTCH);
+    }
+
+    #[test]
+    fn an_unreadable_wheel_setting_falls_back_to_the_windows_default() {
+        // An action Windows does not recognise cannot fill the value in.
+        assert_eq!(system_scroll_amount(0xFFFF), DEFAULT_LINES_PER_NOTCH);
     }
 
     #[test]
