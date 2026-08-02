@@ -65,6 +65,9 @@ enum PeerCommand {
     Input(InputEvent),
     /// Tell the peer to place its cursor at an absolute position (reliable).
     Warp { x: i32, y: i32 },
+    /// Tell the peer the cursor has come back to this machine's screen, so its
+    /// input belongs here now (reliable).
+    CursorReturned { x: i32, y: i32 },
     /// Send a clipboard update to the peer over the reliable control stream.
     Clipboard(ClipboardData),
     /// End the session and close the connection.
@@ -539,12 +542,19 @@ fn route_captured(shared: &Arc<Shared>, event: InputEvent) {
 /// adopt its position so edge detection matches what the user sees.
 fn sync_cursor_to_os(state: &mut State, shared: &Shared) {
     if let Some((x, y)) = omni_input::platform::cursor_position() {
-        let clamped = Point::new(
-            (x.max(0) as u32).min(shared.local_screen.width.saturating_sub(1)),
-            (y.max(0) as u32).min(shared.local_screen.height.saturating_sub(1)),
-        );
+        let clamped = clamp_to_screen(shared.local_screen, x, y);
         state.cursor = CursorState::new(shared.local_machine, clamped);
     }
+}
+
+/// A position kept inside `screen`. Where the cursor is tracked always has to be
+/// a real spot on the screen holding it: a position outside would read as a
+/// crossing the moment the mouse next moves.
+fn clamp_to_screen(screen: Screen, x: i32, y: i32) -> Point {
+    Point::new(
+        (x.max(0) as u32).min(screen.width.saturating_sub(1)),
+        (y.max(0) as u32).min(screen.height.saturating_sub(1)),
+    )
 }
 
 /// Moves the virtual cursor. Returns `true` when the move crossed an edge
@@ -584,6 +594,14 @@ fn advance_cursor(state: &mut State, shared: &Shared, delta: omni_protocol::Mous
 
 /// Puts the real cursor where the virtual one just landed: on the peer via a
 /// reliable warp message, or locally via the sink.
+///
+/// Either way the peers are told, because a crossing is also what decides where
+/// every keyboard types. The cursor landing on a peer is that peer's cue to take
+/// its input back ([`ControlMessage::CursorWarp`]); the cursor landing back here
+/// is every peer's cue to send its input to this machine
+/// ([`ControlMessage::CursorReturned`]). Only the first half used to travel, so
+/// a peer never learned that the cursor had left it and went on typing on its
+/// own desktop.
 fn place_cursor_after_crossing(state: &State, shared: &Shared, crossing: Crossing) {
     let x = crossing.entry.x as i32;
     let y = crossing.entry.y as i32;
@@ -593,6 +611,9 @@ fn place_cursor_after_crossing(state: &State, shared: &Shared, crossing: Crossin
             && let Err(e) = sink.warp(x, y)
         {
             tracing::warn!(%e, "could not place the local cursor");
+        }
+        for link in state.links.values() {
+            let _ = link.commands.send(PeerCommand::CursorReturned { x, y });
         }
     } else if let Some(link) = state.links.get(&crossing.peer) {
         let _ = link.commands.send(PeerCommand::Warp { x, y });
@@ -1048,6 +1069,14 @@ async fn run_peer(
                                 break;
                             }
                         }
+                        PeerCommand::CursorReturned { x, y } => {
+                            let message =
+                                Message::Control(ControlMessage::CursorReturned { session, x, y });
+                            if control_tx.send(&message).await.is_err() {
+                                closing = true;
+                                break;
+                            }
+                        }
                         PeerCommand::Clipboard(data) => {
                             // Handed over, not written here: see
                             // `run_clipboard_sender`. This must not wait.
@@ -1103,6 +1132,13 @@ async fn run_peer(
                             // machine, so it is the one in control now.
                             yield_control_to_peer(&shared);
                             warp(&shared, x, y);
+                        }
+                    }
+                    Ok(Some(Message::Control(ControlMessage::CursorReturned { session: claimed, x, y }))) => {
+                        if claimed == session {
+                            // The cursor has left this machine for the peer's own
+                            // screen, so this machine's input follows it there.
+                            follow_peer_cursor(&shared, machine, x, y);
                         }
                     }
                     Ok(Some(_)) => {} // heartbeats keep the session alive
@@ -1203,6 +1239,45 @@ fn yield_control_to_peer(shared: &Arc<Shared>) {
     };
     if gave_way {
         tracing::info!("a peer took control; input is back on the local screen");
+        notify_change(shared);
+    }
+}
+
+/// Sends this machine's input to the peer, which has just taken the cursor back
+/// onto its own screen at `(x, y)`.
+///
+/// The mirror of [`yield_control_to_peer`], and the half that used to be
+/// missing. Giving way when a peer crosses onto this machine is only one side of
+/// the hand-over: when the cursor leaves again this machine has to hear about it
+/// too, or its keyboard goes on typing on its own desktop while the cursor sits
+/// on the peer — which is what made a keyboard work locally and nowhere else.
+/// The position comes along so the one shared cursor keeps being tracked from
+/// where it really is, rather than from wherever this machine last saw it.
+fn follow_peer_cursor(shared: &Arc<Shared>, peer: MachineId, x: i32, y: i32) {
+    let followed = {
+        let mut state = shared.lock();
+        // Without that peer's screen on record there is nothing to track the
+        // cursor against, and the next movement would only lose it again.
+        let Some(screen) = state.layout.screen(peer) else {
+            return;
+        };
+        let before = state.sessions.active_target();
+        if let Err(e) = state.sessions.follow_peer(peer) {
+            tracing::debug!(%e, "ignoring a hand-over from a peer with no session");
+            return;
+        }
+        // Refreshed even when this machine was already following that peer: the
+        // message says where the cursor really is, which is worth more than
+        // wherever this machine last worked it out to be.
+        state.cursor = CursorState::new(peer, clamp_to_screen(screen, x, y));
+        shared.sync_suppression(&state);
+        before != ActiveTarget::Remote(peer)
+    };
+    if followed {
+        tracing::info!(
+            machine = peer.value(),
+            "the cursor is on a peer; local input follows it there"
+        );
         notify_change(shared);
     }
 }
