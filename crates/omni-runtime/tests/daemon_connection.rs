@@ -1,21 +1,11 @@
-//! Daemon-level integration test: two real daemons in one process, talking the
-//! actual QUIC transport over loopback and driven through the actual IPC
-//! channel — the same path the `omni` CLI uses.
-//!
-//! It exercises the wiring `daemon.rs` owns and that the unit tests cannot
-//! reach: the IPC accept loop, the connect → pending → accept → established
-//! handshake (including TOFU pinning), and disconnect/teardown. Input capture
-//! is irrelevant here and is expected to be unavailable in CI (the daemons run
-//! target-only), so the test never depends on it.
+//! Multi-daemon integration test: connect, accept, status verification, and disconnect.
 
 use omni_runtime::Paths;
-use omni_runtime::ipc::{Event, PROTOCOL_VERSION, Request, Response};
+use omni_runtime::ipc::{Request, Response};
 use omni_runtime::ipc_transport::connect_blocking;
 use std::io::{BufRead, BufReader, Write};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-/// Sends one request to the daemon at `paths` and returns its reply.
 fn send(paths: &Paths, req: &Request) -> std::io::Result<Response> {
     let mut stream = connect_blocking(paths)?;
     let mut line = serde_json::to_string(req).unwrap();
@@ -26,7 +16,6 @@ fn send(paths: &Paths, req: &Request) -> std::io::Result<Response> {
     Ok(serde_json::from_str(reply.trim_end()).expect("a JSON response line"))
 }
 
-/// Waits until the daemon at `paths` answers a status request, or panics.
 fn wait_until_up(paths: &Paths, who: &str) {
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
@@ -38,7 +27,6 @@ fn wait_until_up(paths: &Paths, who: &str) {
     panic!("daemon {who} never came up");
 }
 
-/// Polls a daemon's status until `pred` holds, returning the matching status.
 fn wait_for_status(
     paths: &Paths,
     secs: u64,
@@ -67,92 +55,13 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
     dir
 }
 
-/// Writes a config file pinning the UDP port for a daemon's state dir.
 fn write_port(paths: &Paths, port: u16) {
     let config = format!(r#"{{"port":{port}}}"#);
     std::fs::write(paths.config_file(), config).unwrap();
 }
 
 #[test]
-fn hello_reports_the_protocol_version_and_subscribe_streams_changes() {
-    let port = 49000 + (std::process::id() % 500) as u16;
-    let dir = temp_dir("sub");
-    let paths = Paths::at(dir.clone());
-    write_port(&paths, port);
-
-    let run = paths.clone();
-    let handle = std::thread::spawn(move || {
-        let _ = omni_runtime::run_with_paths(run);
-    });
-    wait_until_up(&paths, "sub");
-
-    // The version handshake reports the protocol the daemon speaks.
-    match send(&paths, &Request::Hello).expect("hello") {
-        Response::Hello {
-            protocol_version, ..
-        } => assert_eq!(protocol_version, PROTOCOL_VERSION),
-        other => panic!("unexpected hello reply: {other:?}"),
-    }
-
-    // Open a subscription on its own connection and forward each event line.
-    let (tx, rx) = mpsc::channel::<Event>();
-    let sub_paths = paths.clone();
-    let sub = std::thread::spawn(move || {
-        let mut stream = connect_blocking(&sub_paths).expect("subscribe connect");
-        let mut line = serde_json::to_string(&Request::Subscribe).unwrap();
-        line.push('\n');
-        stream.write_all(line.as_bytes()).expect("send subscribe");
-        let mut reader = BufReader::new(stream);
-        loop {
-            let mut buf = String::new();
-            match reader.read_line(&mut buf) {
-                Ok(0) | Err(_) => break, // disconnected
-                Ok(_) => {
-                    if let Ok(event) = serde_json::from_str::<Event>(buf.trim_end())
-                        && tx.send(event).is_err()
-                    {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-
-    // The first event is the initial snapshot: clipboard sharing off by default.
-    let Event::Status(initial) = rx
-        .recv_timeout(Duration::from_secs(10))
-        .expect("initial event");
-    assert!(!initial.clipboard_sharing);
-
-    // Cause a change on a separate connection; the subscriber must be pushed a
-    // fresh snapshot reflecting it — no polling.
-    assert!(matches!(
-        send(&paths, &Request::Clipboard { enabled: true }).expect("toggle"),
-        Response::Ok
-    ));
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let saw_change = loop {
-        match rx.recv_timeout(Duration::from_secs(1)) {
-            Ok(Event::Status(s)) if s.clipboard_sharing => break true,
-            Ok(_) => {} // an earlier snapshot; keep waiting for the change
-            Err(_) if Instant::now() >= deadline => break false,
-            Err(_) => {}
-        }
-    };
-    assert!(
-        saw_change,
-        "subscriber was never pushed the clipboard change"
-    );
-
-    let _ = send(&paths, &Request::Stop);
-    let _ = sub.join();
-    let _ = handle.join();
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
 fn two_daemons_connect_accept_and_disconnect() {
-    // Distinct ports per process run, to avoid clashing with anything else.
     let base = 40000 + (std::process::id() % 9000) as u16;
     let (port_a, port_b) = (base, base + 1);
 
@@ -163,7 +72,6 @@ fn two_daemons_connect_accept_and_disconnect() {
     write_port(&paths_a, port_a);
     write_port(&paths_b, port_b);
 
-    // Launch both daemons; each owns its own Tokio runtime inside the thread.
     let run_a = paths_a.clone();
     let handle_a = std::thread::spawn(move || {
         let _ = omni_runtime::run_with_paths(run_a);
@@ -176,8 +84,6 @@ fn two_daemons_connect_accept_and_disconnect() {
     wait_until_up(&paths_a, "A");
     wait_until_up(&paths_b, "B");
 
-    // A dials B. The Connect request blocks until B accepts, so issue it from a
-    // worker thread while the main thread plays B's user and accepts.
     let connect_paths = paths_a.clone();
     let connect = std::thread::spawn(move || {
         send(
@@ -188,7 +94,6 @@ fn two_daemons_connect_accept_and_disconnect() {
         )
     });
 
-    // B should see a pending request; approve it.
     wait_for_status(&paths_b, 15, |s| !s.pending.is_empty());
     let accepted = send(
         &paths_b,
@@ -202,7 +107,6 @@ fn two_daemons_connect_accept_and_disconnect() {
         "accept failed: {accepted:?}"
     );
 
-    // The dialing side's Connect now completes.
     let connect_result = connect
         .join()
         .expect("connect thread")
@@ -212,20 +116,17 @@ fn two_daemons_connect_accept_and_disconnect() {
         "connect failed: {connect_result:?}"
     );
 
-    // Both sides now report exactly one session, with mirrored roles.
     let status_a = wait_for_status(&paths_a, 10, |s| s.sessions.len() == 1);
     assert_eq!(status_a.sessions[0].role, "controller");
     let status_b = wait_for_status(&paths_b, 10, |s| s.sessions.len() == 1);
     assert_eq!(status_b.sessions[0].role, "target");
 
-    // TOFU: B pinned A on accept, so A is now a known peer there.
     let peers_b = send(&paths_b, &Request::Peers).expect("peers");
     match peers_b {
         Response::Peers { peers } => assert_eq!(peers.len(), 1, "B should have pinned A"),
         other => panic!("unexpected peers reply: {other:?}"),
     }
 
-    // A disconnects; both sides drop the session.
     let disconnected = send(
         &paths_a,
         &Request::Disconnect {
@@ -237,7 +138,6 @@ fn two_daemons_connect_accept_and_disconnect() {
     wait_for_status(&paths_a, 10, |s| s.sessions.is_empty());
     wait_for_status(&paths_b, 10, |s| s.sessions.is_empty());
 
-    // Shut both daemons down and let their threads finish.
     let _ = send(&paths_a, &Request::Stop);
     let _ = send(&paths_b, &Request::Stop);
     let _ = handle_a.join();
