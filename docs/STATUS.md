@@ -5,7 +5,64 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-08-02 (**the keyboard now follows the cursor onto the other
+_Last updated: 2026-08-23 (**the cross-platform desktop client became a complete
+front end for the daemon and the CLI.**
+
+A third client landed alongside the two native ones: Tauri 2 + React under
+[`omni/`](../omni), targeting all three operating systems from one codebase. It
+embeds the daemon rather than assuming one is installed — it links
+`omni-runtime` and runs it on a background thread — so installing the app is the
+whole installation. This round made it a client of the *whole* product rather
+than most of it.
+
+**Stopping the daemon was a one-way door.** The daemon was started once, at
+launch, and nothing could start it again: pressing Stop left the app running
+with nothing to talk to and no remedy but quitting. A `Supervisor` now owns the
+thread and can start it again, and General offers Start or Stop depending on
+which one is possible. The supervisor also reports *why* the daemon ended, which
+distinguishes the two cases that used to look identical — a daemon that crashed,
+and one that simply stood down because `omni start` had got to the socket first.
+The second is ordinary and says nothing; only the first is an error.
+
+**`omni doctor` reached the window, as a pane of its own.** It was CLI-only, and
+the protocol has no `Doctor` request to carry it — the CLI runs the checks in its
+own process. This client links the runtime, so it can do exactly the same thing
+without inventing a message for it, which the native clients cannot. It matters
+more in a GUI than in a terminal: someone who never granted Accessibility got a
+machine that could only be driven, labelled "Target only" with nothing saying
+why. The pane leads with a verdict — everything good, or how many problems —
+then each check with what was found and how to fix it, failures first. The count
+is badged on the sidebar, because nobody opens Doctor on a machine they believe
+is working. A machine whose checks have not run is reported as unchecked rather
+than healthy: a green light nobody earned is the one answer no user questions.
+
+**Incoming requests are answerable with the window closed**, which is the normal
+state for a tray app and exactly when a peer asks for control. The tray menu now
+carries the waiting requests with Accept and Reject per peer, the count is in the
+tooltip, and a notification announces each new one — once per peer, tracked by
+fingerprint rather than host name, because two machines can report the same name.
+
+**The `omni` command ships inside the app.** There was no `externalBin`, so
+installing the app gave the window and no command. The CLI is now bundled as a
+sidecar, staged by a build script, and installable onto the PATH from System —
+into the same directory the install scripts use, honouring the same
+`OMNI_INSTALL_DIR`.
+
+Also: the per-peer modifier swap was plumbed end to end but surfaced nowhere, and
+now has a control next to the layout edge; the app and daemon versions are shown
+separately, since they differ whenever the window is driving a daemon it did not
+start; and the bundle version was 0.1.0 against a 0.7.3 workspace.
+
+The client had **no tests and no CI**, against the project's own rules. It now
+has 29 Rust tests, 23 window tests, and a `Desktop client` workflow running the
+full gate — bun tests, typecheck, `cargo fmt`, clippy, `cargo test`, and a real
+packaging build — on Linux, macOS and Windows. Those tests found two defects
+while being written, both in the same place: there is one error slot, and two
+things were quietly overwriting it. A failure to start the daemon was replaced by
+the follow-up refresh's "the daemon is not running", and later by the background
+doctor run clearing the slot on success — each hiding the cause behind a symptom.
+
+Earlier: **the keyboard now follows the cursor onto the other
 machine.**
 
 There is one cursor, and whichever machine it is sitting on is the machine every
@@ -327,7 +384,9 @@ IPC path. A **GitHub Actions** workflow runs the quality gate on all three
 platforms.
 
 The whole workspace builds clean under `cargo fmt`, `cargo clippy -D warnings`,
-and `cargo test` (189 tests), including on Windows.
+and `cargo test` (194 tests), including on Windows. The cross-platform desktop
+client carries its own gate outside the workspace: 29 Rust tests and 18 window
+tests, plus a packaging build, on all three platforms.
 
 ## Crate status
 
@@ -342,6 +401,14 @@ and `cargo test` (189 tests), including on Windows.
 | `omni-transport` | **Implemented** | `SecureChannel` port, framing, loopback channel, and the real QUIC adapter (quinn + rustls, mTLS, TOFU verifiers, datagrams, control stream, and a bulk stream per clipboard transfer so a large payload cannot delay the heartbeats that keep a session alive). The input path is tuned for latency: a shallow datagram send buffer (drops oldest stale positions) and the BBR congestion controller. 15 tests. |
 | `omni-runtime`   | **Implemented** | The daemon: config/paths, persistent identity, trust store, rate limiter, cross-platform IPC (Unix socket / Windows named pipe), heartbeats, configurable layout, opt-in clipboard sync on its own bulk stream, handed to a per-peer sender task so the loop that keeps the session alive never waits on a large write (toggleable at runtime and persisted), doctor checks, and the composition root that runs the pipelines. The peer task coalesces a backlog of queued cursor positions to the latest one (keeping clicks/keys/scrolls intact) so a congested link does not make the cursor lag. A live IPC event channel (`Subscribe` → `Event` snapshots, push not poll) and a protocol-version handshake (`Hello`) back native GUI clients. 35 tests + two integration tests. |
 | `omni-cli`       | **Implemented** | The full `omni` binary: start/stop/status, doctor, connect/disconnect, accept/reject, peers (+ remove), layout, clipboard on/off, uninstall, over the daemon's Unix socket. |
+
+Outside the Cargo workspace, with its own toolchain and CI job:
+
+| Client | Status | What's there |
+| ------ | ------ | ------------ |
+| `omni/` (Tauri 2 + React) | **Implemented** | The cross-platform window, on macOS, Windows and Linux from one codebase. Embeds the daemon (`omni-runtime` on a background thread, supervised so it can be stopped and started again) and bundles the `omni` CLI as a sidecar, so one install is the whole product. Covers every CLI command but `update` and `uninstall`: status, start/stop, connect/disconnect, accept/reject, peers (+ forget), layout, modifier swap, clipboard, and `doctor` run in-process. Requests are answerable from the tray with the window closed, and announced once per peer. 29 Rust tests + 18 window tests. |
+| `clients/omni-macos` (SwiftUI) | **Implemented** | The native macOS app, done by the owner. |
+| `clients/omni-windows` (WinUI 3) | **Implemented** | The native Windows app: `Omni.Ipc`, `Omni.App.Core`, `Omni.App`, 27 unit tests. |
 
 ### What `omni-protocol` provides
 
@@ -611,9 +678,20 @@ Everything below is known, deliberate, and ordered roughly by importance:
 - **Caps Lock cannot be injected into macOS.** Capture works in both directions,
   but `CGEventPost` cannot move the Caps Lock latch — only IOKit HID can — so a
   remote machine's Caps Lock has no effect on a Mac being controlled.
-- **The GUIs do not expose `doctor` or the modifier swap.** `omni modifiers` and
-  the permission checks are CLI-only. Both are worth surfacing, in both clients
-  at once so the layout parity holds.
+- **The two native GUIs do not expose `doctor` or the modifier swap.** The
+  cross-platform client now has both; the macOS and Windows apps still have
+  neither, and should get them together so the layout parity holds. `doctor` is
+  harder there than it was in `omni/`: those clients speak only IPC, and the
+  protocol has no `Doctor` request — adding one is the additive change it needs.
+- **The desktop client cannot update or uninstall itself.** `omni update` needs
+  the Tauri updater plugin, a signing key pair, and a release endpoint; the pane
+  says so rather than pretending. `omni uninstall` deletes a binary, which is the
+  wrong shape for a bundled app — removing it is the OS's job. What is arguably
+  missing is a "forget everything" action that clears config, certificates and
+  pinned peers without touching the app.
+- **The desktop client is not in the release workflow.** CI builds and packages
+  it on all three platforms, but `release.yml` still ships only the CLI, so no
+  bundle is attached to a release yet.
 - **Automatic reconnection.** `omni connect` between two real machines
   (Windows ↔ macOS) is validated and works, including clipboard. What is missing
   is recovery from a *dropped* link: when the connection fails (network blip,
@@ -658,9 +736,15 @@ peers, layout, and clipboard. Still to do on the client: a tray entry for the
 accept prompt when the window is closed, and (after the backend lands) discovery
 and pairing.
 
+**The cross-platform client (`omni/`) is the furthest along.** Tauri 2 + React,
+all three operating systems from one codebase, and the only client that is a
+complete front end for the daemon *and* ships the CLI. It is the exception to
+constraint 1: it embeds the daemon instead of assuming one, so a single install
+is the whole product. Constraints 2–4 hold for it unchanged — the window still
+speaks the same IPC and owns no state. Linux is no longer CLI-only because of it.
+
 Next on the **daemon** side: the mDNS + pairing-code connection backend (Phase 2,
-Rust), which the Windows app and the **macOS** app (done natively by the owner)
-both consume. Linux stays CLI-only.
+Rust), which all three clients consume.
 
 ## Open decisions
 

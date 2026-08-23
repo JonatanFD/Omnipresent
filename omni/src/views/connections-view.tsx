@@ -16,7 +16,7 @@ import {
   SettingsSection,
   SettingsStack,
 } from "@/components/settings";
-import { EDGES, type Edge } from "@/lib/ipc";
+import { EDGES, type Edge, type ModifierSwap } from "@/lib/ipc";
 import {
   useDaemonStore,
   useIsConnected,
@@ -24,6 +24,7 @@ import {
   usePending,
   usePlacements,
   useSessions,
+  useSwaps,
 } from "@/stores/daemon-store";
 
 /**
@@ -36,9 +37,14 @@ export function ConnectionsView() {
   const pending = usePending();
   const peers = usePeers();
   const placements = usePlacements();
+  const swaps = useSwaps();
 
   const hasData =
-    sessions.length > 0 || pending.length > 0 || peers.length > 0 || placements.length > 0;
+    sessions.length > 0 ||
+    pending.length > 0 ||
+    peers.length > 0 ||
+    placements.length > 0 ||
+    swaps.length > 0;
 
   if (!isConnected && !hasData) {
     return (
@@ -57,6 +63,7 @@ export function ConnectionsView() {
       {sessions.length > 0 ? <SessionsSection /> : null}
       {peers.length > 0 ? <PeersSection /> : null}
       {placements.length > 0 ? <LayoutSection /> : null}
+      {swaps.length > 0 ? <ModifiersSection /> : null}
     </div>
   );
 }
@@ -223,6 +230,58 @@ function LayoutSection() {
               {EDGES.map((edge) => (
                 <SelectItem key={edge} value={edge}>
                   {edge.charAt(0).toUpperCase() + edge.slice(1)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      ))}
+    </SettingsSection>
+  );
+}
+
+/** How each option reads to someone who does not know the protocol term. */
+const SWAP_LABEL: Record<ModifierSwap, string> = {
+  none: "Send as pressed",
+  "meta-control": "Swap ⌘ and Ctrl",
+};
+
+const SWAPS = Object.keys(SWAP_LABEL) as ModifierSwap[];
+
+/**
+ * The per-peer modifier relabelling behind `omni modifiers`.
+ *
+ * Copy is Command-C on a Mac and Control-C everywhere else, and each machine
+ * sends the key it was actually given — so a Mac driving a PC sends Windows-C,
+ * which copies nothing. Off by default, because the swap is only right for a
+ * Mac-to-PC pairing.
+ */
+function ModifiersSection() {
+  const swaps = useSwaps();
+  const setModifiers = useDaemonStore((s) => s.setModifiers);
+
+  return (
+    <SettingsSection
+      title="Modifier keys"
+      footer="Turn this on for a Mac paired with a PC, so the copy and paste shortcuts you know keep working."
+    >
+      {swaps.map((swap) => (
+        <SettingsRow
+          key={swap.host}
+          label={swap.host}
+          description={swap.connected ? undefined : "Saved for the next connection"}
+        >
+          <Select
+            value={swap.swap}
+            onValueChange={(next) => void setModifiers(swap.host, next as ModifierSwap)}
+          >
+            <SelectTrigger size="sm" className="w-44" aria-label={`Modifier keys for ${swap.host}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SWAPS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {SWAP_LABEL[option]}
                 </SelectItem>
               ))}
             </SelectContent>

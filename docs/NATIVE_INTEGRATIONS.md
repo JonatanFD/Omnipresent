@@ -166,27 +166,62 @@ OS", but "what can a non-technical user install in one step".
 The native clients assume a daemon is already installed and running. That is two
 installations for the user: the daemon, then the app. This client removes the
 second step by **linking `omni-runtime` and starting the daemon on a background
-thread inside its own process** (`omni/src-tauri/src/lib.rs`). Installing the app
-installs everything.
+thread inside its own process** (`omni/src-tauri/src/daemon.rs`). Installing the
+app installs everything — including the `omni` command, which is bundled as a
+Tauri sidecar and can be put on the PATH from System.
 
-Three consequences follow, and they are all deliberate:
+Four consequences follow, and they are all deliberate:
 
 - **The window still talks over IPC**, to the daemon in its own process, exactly
   as the CLI does. The core is used unmodified and owns all state, so constraints
   2–4 are untouched. It also means the window works unchanged against a daemon
   that was already running — if one owns the socket, the embedded one stands down
   and the window simply talks to the one that is there.
+- **The daemon has to be startable, not only stoppable.** It lives on a thread of
+  this process, so a `Supervisor` owns that thread: stopping the daemon without a
+  way to start it again would leave the app running with nothing to talk to. The
+  supervisor also distinguishes a daemon that failed from one that stood down for
+  another that was already there — the second is normal and is not reported.
 - **Closing the window must not stop input sharing**, so the app lives in the
   **system tray**: closing hides the window, and Quit is an explicit tray action.
+  A closed window is the usual state when a peer asks for control, so the tray
+  menu carries the waiting requests and a notification announces each new one.
 - **Quitting the app stops the daemon**, because they are one process. This is the
-  honest reading of what the user asked for by choosing Quit.
+  honest reading of what the user asked for by choosing Quit — and it stops it
+  through its own IPC, so sessions close and the socket is released rather than
+  being cut off. A daemon this app did not start is left running.
+
+### Why `doctor` can live here and not in the native clients
+
+`omni doctor` is not an IPC request: the CLI runs the checks in its own process
+against `omni_runtime::doctor`. A client that speaks only IPC therefore cannot
+offer it without an additive `Doctor` message. This one links the runtime, so it
+runs the same checks the same way (`omni/src-tauri/src/diagnostics.rs`).
+
+This is the one capability the embedding buys that is not just packaging, and it
+is worth having: in a terminal a missing Accessibility permission is one command
+away from being explained, while in a window it shows up only as a machine that
+mysteriously cannot drive anything.
 
 ### Layout
 
-The same four sections as the macOS app, in the same order — General,
-Connections, System, Update — with the daemon status shown in the sidebar and the
-count of pending requests badged on Connections. Shared identity comes from
-behaviour and information architecture, not from pixels.
+The macOS app's four sections, in the same order — General, Connections, System,
+Update — with the daemon status shown in the sidebar and the count of pending
+requests badged on Connections. Shared identity comes from behaviour and
+information architecture, not from pixels.
+
+It adds a fifth, **Doctor**, which is the one deliberate departure from that
+parity: it exists because this client *can* run the checks and the others
+cannot (see below). It gives a verdict before the detail, and badges a failing
+check on the sidebar — an unchecked machine is reported as unchecked, never as
+healthy, since a green light nobody earned is the one answer no user would think
+to question. When the native clients get `doctor` over an additive `Doctor`
+request, they should adopt the same pane and the parity is restored.
+
+Every `omni` subcommand is reachable from the window except two. `update` needs
+the Tauri updater plugin, a signing key and a release endpoint, and the pane says
+so rather than offering a button that does nothing. `uninstall` deletes a binary,
+which is the wrong shape for a bundled app — removing one is the OS's job.
 
 ### Toolchain
 
@@ -194,6 +229,13 @@ React 19, Vite, Tailwind CSS v4, shadcn/ui (Base UI primitives) and zustand for
 state. It sits **outside the Cargo workspace**: `omni/src-tauri` declares its own
 `[workspace]`, so `cargo build --workspace` at the repo root never pulls in Tauri
 or the webview toolchain (constraint 6).
+
+Its quality gate (constraint 21) runs on Linux, macOS and Windows in the
+`Desktop client` workflow: the window's tests, a typecheck, `cargo fmt`, clippy
+with warnings denied, the Rust tests, and a packaging build that also proves the
+CLI sidecar stages. The path filter includes `crates/**`, because this client
+depends on the core by path and a change there can break it without touching
+anything under `omni/`.
 
 ## IPC evolution: a live event channel
 

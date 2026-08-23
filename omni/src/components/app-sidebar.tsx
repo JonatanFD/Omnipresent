@@ -1,4 +1,4 @@
-import { Antenna, Download, Network, Settings } from "lucide-react";
+import { Antenna, Download, Network, Settings, Stethoscope } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
   Sidebar,
@@ -13,15 +13,20 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useConnection, usePending } from "@/stores/daemon-store";
+import { useConnection, useFailingChecks, usePending } from "@/stores/daemon-store";
 
-/** The four panes, in the order the macOS app lists them. */
-export type Section = "general" | "connections" | "system" | "update";
+/**
+ * The panes, in order. The first four are the macOS app's, unchanged; Doctor is
+ * this client's own, because it links the runtime and can run the checks that
+ * an IPC-only client has no message to ask for.
+ */
+export type Section = "general" | "connections" | "system" | "doctor" | "update";
 
 const SECTIONS: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "general", label: "General", icon: Antenna },
   { id: "connections", label: "Connections", icon: Network },
   { id: "system", label: "System", icon: Settings },
+  { id: "doctor", label: "Doctor", icon: Stethoscope },
   { id: "update", label: "Update", icon: Download },
 ];
 
@@ -29,6 +34,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   general: "General",
   connections: "Connections",
   system: "System",
+  doctor: "Doctor",
   update: "Update",
 };
 
@@ -48,6 +54,7 @@ export function AppSidebar({
 }) {
   const connection = useConnection();
   const pending = usePending();
+  const failing = useFailingChecks();
 
   return (
     <Sidebar collapsible="none" className="border-r">
@@ -71,6 +78,13 @@ export function AppSidebar({
                       an incoming request is waiting on a human decision. */}
                   {id === "connections" && pending.length > 0 ? (
                     <SidebarMenuBadge>{pending.length}</SidebarMenuBadge>
+                  ) : null}
+
+                  {/* Same reasoning for a failing check: nobody opens Doctor on
+                      a machine they believe is working, which is exactly the
+                      machine that is quietly target-only. */}
+                  {id === "doctor" && failing > 0 ? (
+                    <SidebarMenuBadge className="text-destructive">{failing}</SidebarMenuBadge>
                   ) : null}
                 </SidebarMenuItem>
               ))}

@@ -81,9 +81,37 @@ export interface DaemonVersion {
   compatible: boolean;
 }
 
-/** Events the Rust side pushes. Must match the constants in `src-tauri/src/ipc.rs`. */
+/** One environment requirement and whether it is met. */
+export interface CheckInfo {
+  name: string;
+  ok: boolean;
+  /** What was found — and, when not ok, how to fix it. */
+  detail: string;
+}
+
+/** Where the `omni` command is, or could be. */
+export interface CliStatus {
+  /** Where it would be installed to. */
+  target: string;
+  installed: boolean;
+  /** Whether that directory is on the PATH of the session that launched us. */
+  on_path: boolean;
+  /** False in a development build, where no CLI has been bundled. */
+  available: boolean;
+}
+
+/** Why the embedded daemon stopped. */
+export interface DaemonExit {
+  /** The failure that ended it, or null when it was asked to stop. */
+  reason: string | null;
+  /** True when another daemon owns the socket, so ours was never needed. */
+  stood_down: boolean;
+}
+
+/** Events the Rust side pushes. Must match the constants in `src-tauri/src/`. */
 export const STATUS_EVENT = "daemon://status";
 export const DISCONNECTED_EVENT = "daemon://disconnected";
+export const EXITED_EVENT = "daemon://exited";
 
 /**
  * The daemon commands, one per Tauri command. Each rejects with the daemon's own
@@ -93,6 +121,12 @@ export const daemon = {
   status: () => invoke<StatusInfo>("daemon_status"),
   hello: () => invoke<DaemonVersion>("daemon_hello"),
   stop: () => invoke<void>("daemon_stop"),
+  /** Starts the daemon inside this app. Only meaningful after a stop. */
+  start: () => invoke<void>("daemon_start"),
+  /** Whether the daemon being talked to is the one inside this app. */
+  embedded: () => invoke<boolean>("daemon_embedded"),
+  /** The permission and environment checks behind `omni doctor`. */
+  doctor: () => invoke<CheckInfo[]>("daemon_doctor"),
 
   connect: (host: string) => invoke<void>("peer_connect", { host }),
   disconnect: (host: string) => invoke<void>("peer_disconnect", { host }),
@@ -110,6 +144,13 @@ export const daemon = {
     invoke<void>("modifiers_set", { host, swap }),
 
   setClipboard: (enabled: boolean) => invoke<void>("clipboard_set", { enabled }),
+};
+
+/** This installation: the app's own version, and the bundled `omni` command. */
+export const installation = {
+  version: () => invoke<string>("app_version"),
+  cli: () => invoke<CliStatus>("cli_status"),
+  installCli: () => invoke<CliStatus>("cli_install"),
 };
 
 /** Turns whatever `invoke` rejected with into something showable. */

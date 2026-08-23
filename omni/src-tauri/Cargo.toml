@@ -1,6 +1,9 @@
 [package]
 name = "omni"
-version = "0.1.0"
+# Tracks the workspace next door. The app ships the daemon and the CLI from
+# those crates, so three different version numbers for one install would only
+# be confusing — `tauri.conf.json` carries the same one.
+version = "0.7.3"
 description = "Control multiple computers from a single keyboard and mouse"
 authors = ["Jonatan"]
 edition = "2021"
@@ -24,6 +27,10 @@ tauri-build = { version = "2", features = [] }
 # `tray-icon` keeps the app alive in the system tray once the window is closed.
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
+# A connection request needs answering promptly, and the window is usually
+# closed when one arrives. The tray menu makes it actionable; this makes it
+# noticed.
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

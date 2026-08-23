@@ -1,30 +1,21 @@
 //! The desktop client.
 //!
 //! The daemon runs inside this process, so installing the app is the whole
-//! installation — there is no second thing to set up. The window is still only a
-//! client of the daemon's IPC surface (see [`ipc`]); embedding the daemon changes
-//! where it runs, not who owns the state.
+//! installation — there is no second thing to set up, and the `omni` command
+//! ships with it (see [`cli`]). The window is still only a client of the
+//! daemon's IPC surface (see [`ipc`]); embedding the daemon changes where it
+//! runs, not who owns the state.
 
+mod cli;
+mod daemon;
+mod diagnostics;
 mod ipc;
+mod notify;
 mod tray;
 
-use tauri::WindowEvent;
+use tauri::{Manager, WindowEvent};
 
-/// Starts the daemon on a background thread.
-///
-/// A failure here is not fatal. The usual cause is that a daemon is already
-/// running — started by `omni start` or by another copy of this app — and it owns
-/// the socket. In that case the window simply talks to the one that is already
-/// there, which is the behaviour we want anyway.
-fn start_daemon() {
-    std::thread::spawn(|| {
-        if let Err(error) = omni_runtime::run() {
-            // The daemon writes its own log; this only notes why the embedded one
-            // stood down. It never carries key material.
-            eprintln!("omni: the embedded daemon did not start ({error:?})");
-        }
-    });
-}
+use daemon::Supervisor;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -32,13 +23,23 @@ pub fn run() {
     // window and the daemon agree on one coordinate space on a high-DPI display.
     omni_runtime::prepare_process();
 
-    start_daemon();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .manage(Supervisor::default())
         .setup(|app| {
-            tray::create(app.handle())?;
-            ipc::spawn_subscription(app.handle().clone());
+            let handle = app.handle();
+
+            tray::create(handle)?;
+            ipc::spawn_subscription(handle.clone());
+
+            // A failure here is not fatal, and usually is not even a failure: a
+            // daemon started by `omni start`, or by another copy of this app,
+            // owns the socket and ours stands down. The window then talks to the
+            // one that is there, which is what we want. Either way the outcome
+            // arrives as an event rather than being swallowed.
+            let _ = app.state::<Supervisor>().start(handle.clone());
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -50,6 +51,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            daemon::daemon_start,
+            daemon::daemon_embedded,
+            diagnostics::daemon_doctor,
+            cli::cli_status,
+            cli::cli_install,
+            cli::app_version,
             ipc::daemon_status,
             ipc::daemon_hello,
             ipc::daemon_stop,
