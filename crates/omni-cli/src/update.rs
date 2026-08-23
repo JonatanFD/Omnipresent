@@ -16,7 +16,7 @@ const REPO: &str = "JonatanFD/omnipresent";
 /// Runs the update flow and returns a process exit code.
 pub fn update(send: impl Fn(Request) -> Result<Response, String>) -> ExitCode {
     let current = env!("CARGO_PKG_VERSION");
-    let target = match target_triple() {
+    let platform = match asset_platform() {
         Some(t) => t,
         None => {
             eprintln!(
@@ -53,7 +53,7 @@ pub fn update(send: impl Fn(Request) -> Result<Response, String>) -> ExitCode {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
 
-    let result = download_and_replace(target);
+    let result = download_and_replace(platform);
 
     match result {
         Ok(()) => {
@@ -78,14 +78,18 @@ pub fn update(send: impl Fn(Request) -> Result<Response, String>) -> ExitCode {
     }
 }
 
-/// The release asset target triple for this machine, or `None` if unsupported.
-fn target_triple() -> Option<&'static str> {
+/// The `<os>-<arch>` a release asset is published under, or `None` when this
+/// machine has no build.
+///
+/// One build per platform, named the way a person would say it rather than by
+/// Rust's target triple: the name appears on the release page and in the
+/// installers, and `omni-cli-macos-arm64` is readable where
+/// `omni-aarch64-apple-darwin` is not.
+fn asset_platform() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "x86_64") => Some("x86_64-apple-darwin"),
-        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
-        ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
-        ("windows", "x86_64") => Some("x86_64-pc-windows-msvc"),
-        ("windows", "aarch64") => Some("aarch64-pc-windows-msvc"),
+        ("macos", "aarch64") => Some("macos-arm64"),
+        ("linux", "x86_64") => Some("linux-x64"),
+        ("windows", "x86_64") => Some("windows-x64"),
         _ => None,
     }
 }
@@ -110,14 +114,14 @@ fn latest_version() -> Result<String, String> {
     Ok(tag.trim_start_matches('v').to_string())
 }
 
-/// Downloads the latest archive for `target`, unpacks it, and replaces this
+/// Downloads the latest archive for `platform`, unpacks it, and replaces this
 /// running binary with the new one.
-fn download_and_replace(target: &str) -> Result<(), String> {
+fn download_and_replace(platform: &str) -> Result<(), String> {
     let windows = std::env::consts::OS == "windows";
     let (archive, binary) = if windows {
-        (format!("omni-{target}.zip"), "omni.exe")
+        (format!("omni-cli-{platform}.zip"), "omni.exe")
     } else {
-        (format!("omni-{target}.tar.gz"), "omni")
+        (format!("omni-cli-{platform}.tar.gz"), "omni")
     };
     let url = format!("https://github.com/{REPO}/releases/latest/download/{archive}");
 
