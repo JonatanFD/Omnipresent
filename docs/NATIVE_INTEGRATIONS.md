@@ -39,6 +39,13 @@ These are binding rules for any native client.
 
 1. **A GUI is only an IPC client.** It never imports, links, or re-implements the
    core crates (Input, Topology, Session, Security, Transport, Runtime).
+
+   > **Exception — the cross-platform client (`omni/`).** It links `omni-runtime`
+   > and starts the daemon on a background thread inside its own process, so that
+   > installing the app is the entire installation. This changes *where the daemon
+   > runs*, not *who owns the state*: the window still speaks the same JSON-lines
+   > IPC over the same socket, and still re-implements nothing. Constraints 2, 3
+   > and 4 hold for it unchanged. See "The cross-platform client" below.
 2. **The JSON-lines IPC protocol is the only contract.** Clients render state and
    send commands; they never duplicate business logic (trust decisions, layout
    math, edge crossings, fingerprinting).
@@ -56,7 +63,7 @@ These are binding rules for any native client.
 
 5. The rule *"the language of the project is Rust"* still holds for **everything
    below the IPC**. The **GUI layer is the only exception**: Swift/SwiftUI on
-   macOS, C#/WinUI 3 on Windows.
+   macOS, C#/WinUI 3 on Windows, TypeScript/React on the cross-platform client.
 6. Native frontends live **outside the Cargo workspace** (e.g.
    `clients/omni-mac/`, `clients/omni-windows/`), each with its own toolchain and
    its own CI job (Xcode on a macOS runner, `dotnet` on a Windows runner). They
@@ -98,10 +105,15 @@ its OS.
 14. **Platform design language is mandatory.** macOS follows the **Apple Human
     Interface Guidelines (HIG)**; Windows follows the **Fluent Design System** (via
     WinUI 3). Each app must look and behave like a first-party app of its OS.
-15. **Native components only.** Build exclusively from the platform's stock
-    controls (SwiftUI/AppKit on macOS, WinUI 3 on Windows). No custom-drawn widgets
-    that imitate native ones, no third-party UI toolkits, no web views, no porting
-    one platform's controls to the other.
+15. **Native components only** — for the two *native* clients. Build exclusively
+    from the platform's stock controls (SwiftUI/AppKit on macOS, WinUI 3 on
+    Windows). No custom-drawn widgets that imitate native ones, no third-party UI
+    toolkits, no web views, no porting one platform's controls to the other.
+
+    > The cross-platform client is deliberately outside this rule: it is a webview
+    > app and cannot follow it. It trades per-platform fidelity for one codebase on
+    > all three operating systems. Rules 17 and 19 — honouring system appearance,
+    > and accessibility — still bind it.
 16. **Customization is layout only.** The single permitted modification is
     *arranging* native components to present omni's information. No restyling of
     controls, no custom themes, colors, typography, spacing, icons, or animations —
@@ -141,6 +153,47 @@ workspace and would otherwise escape it.
     runs its tests on every change, mirroring the Rust quality gate (fmt · lint ·
     test). A change does not merge with failing or missing tests, and stability is
     favored over feature velocity — no flaky or untested interface ships.
+
+## The cross-platform client (`omni/`)
+
+A third client, alongside the two native ones: **Tauri 2 + React + TypeScript**,
+targeting macOS, Windows and Linux from one codebase. It exists to answer a
+different question from the native apps — not "what looks most at home on this
+OS", but "what can a non-technical user install in one step".
+
+### Why it embeds the daemon
+
+The native clients assume a daemon is already installed and running. That is two
+installations for the user: the daemon, then the app. This client removes the
+second step by **linking `omni-runtime` and starting the daemon on a background
+thread inside its own process** (`omni/src-tauri/src/lib.rs`). Installing the app
+installs everything.
+
+Three consequences follow, and they are all deliberate:
+
+- **The window still talks over IPC**, to the daemon in its own process, exactly
+  as the CLI does. The core is used unmodified and owns all state, so constraints
+  2–4 are untouched. It also means the window works unchanged against a daemon
+  that was already running — if one owns the socket, the embedded one stands down
+  and the window simply talks to the one that is there.
+- **Closing the window must not stop input sharing**, so the app lives in the
+  **system tray**: closing hides the window, and Quit is an explicit tray action.
+- **Quitting the app stops the daemon**, because they are one process. This is the
+  honest reading of what the user asked for by choosing Quit.
+
+### Layout
+
+The same four sections as the macOS app, in the same order — General,
+Connections, System, Update — with the daemon status shown in the sidebar and the
+count of pending requests badged on Connections. Shared identity comes from
+behaviour and information architecture, not from pixels.
+
+### Toolchain
+
+React 19, Vite, Tailwind CSS v4, shadcn/ui (Base UI primitives) and zustand for
+state. It sits **outside the Cargo workspace**: `omni/src-tauri` declares its own
+`[workspace]`, so `cargo build --workspace` at the repo root never pulls in Tauri
+or the webview toolchain (constraint 6).
 
 ## IPC evolution: a live event channel
 

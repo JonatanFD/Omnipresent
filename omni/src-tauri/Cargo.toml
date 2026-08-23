@@ -1,11 +1,14 @@
 [package]
 name = "omni"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Control multiple computers from a single keyboard and mouse"
+authors = ["Jonatan"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# Its own workspace root. The repo root workspace is `crates/*` only, and the
+# Rust quality gate (`cargo build --workspace`) must not pull in Tauri or the
+# webview toolchain — that stays a concern of this client alone.
+[workspace]
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -18,8 +21,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `tray-icon` keeps the app alive in the system tray once the window is closed.
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# The daemon itself. This client embeds it rather than talking to a separately
+# installed one, so the user installs a single app and nothing else. The core
+# is used as-is: this crate adds no business logic on top of it.
+omni-runtime = { path = "../../crates/omni-runtime" }
