@@ -331,6 +331,92 @@ mod tests {
     }
 
     #[test]
+    fn crossing_the_top_edge_enters_the_neighbor_from_the_bottom() {
+        // The counterpart of the bottom-edge test. Pushing up off this screen
+        // has to land at the *bottom* of the machine placed above, the way
+        // walking off the top of a page continues at the foot of the one above.
+        let mut layout = two_screens(Screen::new(100, 100), Screen::new(100, 100));
+        layout.link(A, Edge::Top, B).unwrap();
+        let cursor = CursorState::new(A, Point::new(30, 0));
+
+        let advance = layout.advance(cursor, MouseDelta::new(0, -5)).unwrap();
+
+        assert_eq!(advance.cursor.machine, B);
+        assert_eq!(advance.cursor.position, Point::new(30, 99));
+        assert_eq!(advance.crossing.unwrap().peer, B);
+    }
+
+    #[test]
+    fn crossing_the_left_edge_enters_the_neighbor_from_the_right() {
+        let mut layout = two_screens(Screen::new(100, 100), Screen::new(100, 100));
+        layout.link(A, Edge::Left, B).unwrap();
+        let cursor = CursorState::new(A, Point::new(0, 40));
+
+        let advance = layout.advance(cursor, MouseDelta::new(-5, 0)).unwrap();
+
+        assert_eq!(advance.cursor.machine, B);
+        assert_eq!(advance.cursor.position, Point::new(99, 40));
+    }
+
+    #[test]
+    fn a_vertical_crossing_maps_position_along_the_width() {
+        // Crossing top or bottom maps *x*, not y — the axis shared with the
+        // neighbor. Getting the axis wrong sends the cursor to a corner.
+        let mut layout = two_screens(Screen::new(101, 100), Screen::new(1001, 100));
+        layout.link(A, Edge::Top, B).unwrap();
+        let cursor = CursorState::new(A, Point::new(50, 0));
+
+        let advance = layout.advance(cursor, MouseDelta::new(0, -2)).unwrap();
+
+        assert_eq!(advance.cursor.position, Point::new(500, 99));
+    }
+
+    #[test]
+    fn coming_back_down_returns_to_the_machine_below() {
+        // The return trip. `link` is symmetric, so a peer placed above this
+        // machine must lead back here across its own bottom edge.
+        let mut layout = two_screens(Screen::new(100, 100), Screen::new(100, 100));
+        layout.link(A, Edge::Top, B).unwrap();
+        let cursor = CursorState::new(B, Point::new(30, 99));
+
+        let advance = layout.advance(cursor, MouseDelta::new(0, 5)).unwrap();
+
+        assert_eq!(advance.cursor.machine, A);
+        assert_eq!(advance.cursor.position, Point::new(30, 0));
+    }
+
+    #[test]
+    fn pushing_up_one_unit_from_the_top_row_is_enough_to_cross() {
+        // The smallest possible crossing. The cursor sits on row 0 — where the
+        // OS parks it against the top of the screen — and the mouse moves up by
+        // a single unit. If this does not cross, no amount of pushing upward
+        // ever will, because the OS never reports a position above 0.
+        let mut layout = two_screens(Screen::new(1920, 1080), Screen::new(1920, 1080));
+        layout.link(A, Edge::Top, B).unwrap();
+        let cursor = CursorState::new(A, Point::new(960, 0));
+
+        let advance = layout.advance(cursor, MouseDelta::new(0, -1)).unwrap();
+
+        assert_eq!(
+            advance.cursor.machine, B,
+            "one unit up from row 0 must cross"
+        );
+    }
+
+    #[test]
+    fn a_diagonal_move_prefers_the_edge_that_has_a_neighbor() {
+        // Mice are never perfectly vertical. Pushing up with a little sideways
+        // drift must still cross upward when only the top edge leads anywhere.
+        let mut layout = two_screens(Screen::new(1920, 1080), Screen::new(1920, 1080));
+        layout.link(A, Edge::Top, B).unwrap();
+        let cursor = CursorState::new(A, Point::new(0, 0));
+
+        let advance = layout.advance(cursor, MouseDelta::new(-8, -3)).unwrap();
+
+        assert_eq!(advance.cursor.machine, B);
+    }
+
+    #[test]
     fn advancing_an_unknown_cursor_machine_fails() {
         let layout = VirtualLayout::new();
         let cursor = CursorState::new(A, Point::new(0, 0));

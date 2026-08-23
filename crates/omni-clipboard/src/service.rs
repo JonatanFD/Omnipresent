@@ -26,6 +26,11 @@ impl<P: ClipboardPort> ClipboardManager<P> {
         }
     }
 
+    /// Returns a reference to the underlying clipboard port adapter.
+    pub fn port(&self) -> &P {
+        &self.port
+    }
+
     /// Whether clipboard sharing is currently on.
     pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
@@ -99,153 +104,5 @@ impl<P: ClipboardPort> ClipboardManager<P> {
         state.last_synced = Some(data);
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::{ClipboardData, ClipboardError, ClipboardImage};
-    use crate::memory::MockClipboardBackend;
-
-    // Test Case 1: Serialization Roundtrip
-    #[test]
-    fn test_clipboard_data_serialization() {
-        let text_data = ClipboardData::Text("Hello World".to_string());
-        let encoded_text = postcard::to_allocvec(&text_data).expect("serialize text");
-        let decoded_text: ClipboardData =
-            postcard::from_bytes(&encoded_text).expect("deserialize text");
-        assert_eq!(text_data, decoded_text);
-
-        let image_data = ClipboardData::Image(ClipboardImage {
-            width: 2,
-            height: 2,
-            bytes: vec![255; 16], // 2x2x4 = 16 bytes
-        });
-        let encoded_image = postcard::to_allocvec(&image_data).expect("serialize image");
-        let decoded_image: ClipboardData =
-            postcard::from_bytes(&encoded_image).expect("deserialize image");
-        assert_eq!(image_data, decoded_image);
-    }
-
-    // Test Case 2: Opt-In Enforcement (Disabled state)
-    #[test]
-    fn test_manager_enforces_opt_in() {
-        let mock = MockClipboardBackend::seeded(ClipboardData::Text("Initial content".to_string()));
-        let manager = ClipboardManager::new(mock, false);
-
-        // poll_local_change should return Err(ClipboardError::Disabled)
-        let res = manager.poll_local_change();
-        assert_eq!(res, Err(ClipboardError::Disabled));
-
-        // handle_remote_update should return Err(ClipboardError::Disabled)
-        let res = manager.handle_remote_update(ClipboardData::Text("Remote update".to_string()));
-        assert_eq!(res, Err(ClipboardError::Disabled));
-
-        // Verify the mock clipboard content remains unchanged
-        assert_eq!(
-            manager.port.get_mock_data(),
-            Some(ClipboardData::Text("Initial content".to_string()))
-        );
-    }
-
-    // Test Case 3: Local Change Detection
-    #[test]
-    fn test_manager_detects_local_change() {
-        let mock = MockClipboardBackend::new();
-        let manager = ClipboardManager::new(mock, true);
-
-        // Initially empty clipboard -> returns Ok(None)
-        assert_eq!(manager.poll_local_change(), Ok(None));
-
-        // User copies text
-        let copied = ClipboardData::Text("Changed!".to_string());
-        manager.port.set_mock_data(copied.clone());
-
-        // First poll -> detects change
-        assert_eq!(manager.poll_local_change(), Ok(Some(copied)));
-
-        // Subsequent poll -> returns Ok(None) because it's already synced
-        assert_eq!(manager.poll_local_change(), Ok(None));
-    }
-
-    // Test Case 4: Echo Protection (Loop Prevention)
-    #[test]
-    fn test_manager_prevents_feedback_loop() {
-        let mock = MockClipboardBackend::new();
-        let manager = ClipboardManager::new(mock, true);
-
-        // Remote update comes in
-        let remote_update = ClipboardData::Text("Synced".to_string());
-        let res = manager.handle_remote_update(remote_update.clone());
-        assert_eq!(res, Ok(()));
-
-        // Verify the OS clipboard contains "Synced"
-        assert_eq!(manager.port.get_mock_data(), Some(remote_update));
-
-        // Polling now should return Ok(None) to prevent feedback loop
-        assert_eq!(manager.poll_local_change(), Ok(None));
-    }
-
-    // Test Case 5: Image Size Validation
-    #[test]
-    fn test_image_dimension_validation() {
-        let invalid_image = ClipboardImage {
-            width: 2,
-            height: 2,
-            bytes: vec![255; 15], // Expected 16, got 15
-        };
-        assert!(invalid_image.validate().is_err());
-
-        let valid_image = ClipboardImage {
-            width: 2,
-            height: 2,
-            bytes: vec![255; 16],
-        };
-        assert!(valid_image.validate().is_ok());
-    }
-
-    // Test Case 6: Image Size Validation Overflow
-    #[test]
-    fn test_image_dimension_validation_overflow() {
-        let invalid_image = ClipboardImage {
-            width: u32::MAX,
-            height: 4,
-            bytes: vec![255; 16], // Expected overflow, should err
-        };
-        assert!(invalid_image.validate().is_err());
-    }
-
-    // Test Case 7: Dynamic Enabling Toggling
-    #[test]
-    fn test_manager_set_enabled_dynamic() {
-        let mock = MockClipboardBackend::seeded(ClipboardData::Text("Content".to_string()));
-        let manager = ClipboardManager::new(mock, false);
-
-        // Initially disabled
-        assert_eq!(manager.poll_local_change(), Err(ClipboardError::Disabled));
-
-        // Enable dynamically using &self
-        manager.set_enabled(true);
-
-        // Should now poll successfully (detects first change)
-        assert!(manager.poll_local_change().is_ok());
-
-        // Disable dynamically
-        manager.set_enabled(false);
-        assert_eq!(manager.poll_local_change(), Err(ClipboardError::Disabled));
-    }
-
-    // Test Case 8: is_enabled reflects the current opt-in state
-    #[test]
-    fn test_manager_reports_enabled_state() {
-        let manager = ClipboardManager::new(MockClipboardBackend::new(), false);
-        assert!(!manager.is_enabled());
-
-        manager.set_enabled(true);
-        assert!(manager.is_enabled());
-
-        manager.set_enabled(false);
-        assert!(!manager.is_enabled());
     }
 }
