@@ -113,9 +113,22 @@ jobs:
           Compress-Archive -Path "target/${{ matrix.target }}/release/omni.exe" `
             -DestinationPath "omni-cli-$name.zip"
 
-          $installer = Get-ChildItem -Path $bundle -Recurse -Include *.exe, *.msi |
+          # The NSIS installer specifically, by name. Tauri also emits an .msi,
+          # and searching the whole bundle for "*.exe, *.msi" walked msi\ before
+          # nsis\ and picked the wrong one — which then got copied to a .exe
+          # name, so Windows read a PE header that was not there and refused it
+          # with "this app can't run on your PC".
+          $installer = Get-ChildItem -Path "$bundle\nsis" -Filter *-setup.exe |
             Select-Object -First 1
+          if (-not $installer) { throw "no NSIS installer under $bundle\nsis" }
           Copy-Item $installer.FullName "omni-desktop-$name.exe"
+
+          # An .exe must start with "MZ". Cheap, and it is exactly the check
+          # that would have caught the mislabelled MSI before it shipped.
+          $magic = [System.IO.File]::ReadAllBytes("omni-desktop-$name.exe")[0..1]
+          $header = -join [char[]]$magic
+          if ($header -ne 'MZ') { throw "omni-desktop-$name.exe is not a PE executable (starts with '$header')" }
+          Write-Host "omni-desktop-$name.exe verified as a PE executable"
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
