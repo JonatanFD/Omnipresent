@@ -3,7 +3,7 @@ name = "omni"
 # Tracks the workspace next door. The app ships the daemon and the CLI from
 # those crates, so three different version numbers for one install would only
 # be confusing — `tauri.conf.json` carries the same one.
-version = "0.8.1"
+version = "0.8.2"
 description = "Control multiple computers from a single keyboard and mouse"
 authors = ["Jonatan"]
 edition = "2021"
