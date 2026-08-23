@@ -5,15 +5,30 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-08-23 — **v0.8.0** (**the cross-platform desktop client became
+_Last updated: 2026-08-23 — **v0.8.1** (**the cross-platform desktop client became
 a complete front end for the daemon and the CLI, and is now released with it.**
 
-The release carries one more artifact than before: `omni-desktop-<target>`, an
-installer per platform that is the whole product in a single download — the
-daemon runs inside it and the `omni` CLI is bundled beside it, both built from
-the same tag. Because one install now means one version, the app, the daemon it
-embeds and the CLI it ships are checked against the workspace before a bundle is
-built, and the packaging build refuses to run if they have drifted apart.
+The release is now **six assets, three jobs**: `omni-desktop-<os>-<arch>` — the
+whole product in one download, the daemon running inside the app and the `omni`
+command bundled beside it — and `omni-cli-<os>-<arch>` for a headless machine or
+anyone who does not want a GUI. Because one install now means one version, the
+app, the daemon it embeds and the CLI it ships are checked against the workspace
+before a bundle is built, and the packaging build refuses to run if they have
+drifted apart.
+
+One job per platform rather than one per artifact: building the desktop app
+already cross-builds the CLI, because that is what gets bundled as the sidecar,
+so publishing the CLI from the same job costs nothing. The first cut of this
+released twelve jobs and twenty-six assets — every Rust target triple, both
+installer formats on each platform, a `.sha256` beside each, and the native
+Windows GUI as well. It worked and took far too long to be worth it.
+
+What that costs, and it is a real cost: **Intel Macs and Arm64 Windows no longer
+get their own build.** Arm64 Windows runs the x64 one under emulation, so
+`install.ps1` gives it that. An Intel Mac gets nothing and is told to build from
+source or run the Apple silicon build under Rosetta. The native **Windows GUI
+(WinUI 3) is no longer attached to releases** either — the cross-platform app
+covers Windows now — though it still builds and tests in its own CI workflow.
 
 A third client landed alongside the two native ones: Tauri 2 + React under
 [`omni/`](../omni), targeting all three operating systems from one codebase. It
