@@ -36,14 +36,14 @@ arch="$(uname -m)"
 case "$os" in
     Darwin)
         case "$arch" in
-            arm64 | aarch64) target="aarch64-apple-darwin" ;;
-            x86_64) target="x86_64-apple-darwin" ;;
+            arm64 | aarch64) platform="macos-arm64" ;;
+            x86_64) err "Intel Macs are not published — build from source, or run the Apple silicon build under Rosetta" ;;
             *) err "unsupported macOS architecture: $arch" ;;
         esac
         ;;
     Linux)
         case "$arch" in
-            x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
+            x86_64 | amd64) platform="linux-x64" ;;
             *) err "unsupported Linux architecture: $arch (only x86_64 is published today)" ;;
         esac
         ;;
@@ -52,7 +52,7 @@ case "$os" in
         ;;
 esac
 
-asset="omni-$target.tar.gz"
+asset="omni-cli-$platform.tar.gz"
 url="https://github.com/$REPO/releases/latest/download/$asset"
 
 tmp="$(mktemp -d)"

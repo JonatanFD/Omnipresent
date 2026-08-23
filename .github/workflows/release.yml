@@ -1,21 +1,18 @@
 name: Release
 
-# Cut a release by pushing a version tag (e.g. `v0.1.0`). This builds the
-# `omni` binary natively on each platform, packages it, and attaches the
-# archives — plus the install scripts — to a GitHub Release. End users never
-# build from source (no Rust toolchain, no C compiler): they download a
-# prebuilt binary with the one-liners in the README.
+# Cut a release by pushing a version tag (e.g. `v0.1.0`).
 #
-# The native Windows GUI (WinUI 3, `clients/omni-windows`) is also built
-# self-contained and attached as `omni-gui-<target>.zip`, so it runs without
-# installing .NET. Both the CLI and the GUI ship for x64 and arm64, so an Arm
-# Windows machine is not left without a build.
+# Six assets, three per platform pair:
 #
-# The cross-platform desktop app (Tauri, `omni/`) ships as an installer per
-# platform — `omni-desktop-<target>`. It is the one download that is the whole
-# product: the daemon runs inside it and the `omni` CLI is bundled alongside,
-# both built from this same tag, so its version is checked against the
-# workspace before it is built.
+#   omni-desktop-<os>-<arch>   the desktop app — the whole product in one
+#                              install: the window, the daemon it runs inside
+#                              itself, and the `omni` command bundled beside it
+#   omni-cli-<os>-<arch>       the command on its own, for a headless machine
+#                              or anyone who does not want a GUI
+#
+# One job per platform, not one per artifact. Building the desktop app already
+# cross-builds the CLI — it is bundled as a sidecar — so the same job publishes
+# both and the CLI costs no extra time. End users never build from source.
 on:
   push:
     tags: ["v*"]
@@ -23,150 +20,31 @@ on:
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  build:
-    name: build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+  release:
+    name: ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Both macOS targets build on the Apple-silicon runner: arm64 native,
-          # x86_64 cross-compiled (the Apple toolchain targets both). This avoids
-          # depending on the older Intel `macos-13` runner.
-          - os: macos-latest
-            target: x86_64-apple-darwin
-          - os: macos-latest
+          # macOS ships for Apple silicon: it is what the runner is, and what
+          # every Mac sold for years has been.
+          - runner: macos-latest
+            os: macos
+            arch: arm64
             target: aarch64-apple-darwin
-          - os: ubuntu-latest
+          - runner: ubuntu-latest
+            os: linux
+            arch: x64
             target: x86_64-unknown-linux-gnu
-          - os: windows-latest
+          - runner: windows-latest
+            os: windows
+            arch: x64
             target: x86_64-pc-windows-msvc
-          # Arm64 Windows is cross-compiled from the x64 runner, the same way
-          # the Intel Mac build comes off the Apple-silicon one.
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust (stable, ${{ matrix.target }})
-        run: |
-          rustup update stable
-          rustup default stable
-          rustup target add ${{ matrix.target }}
-
-      - name: Build
-        run: cargo build --release --locked --bin omni --target ${{ matrix.target }}
-
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          archive="omni-${{ matrix.target }}.tar.gz"
-          tar -czf "$archive" -C "target/${{ matrix.target }}/release" omni
-          if command -v sha256sum >/dev/null; then
-            sha256sum "$archive" > "$archive.sha256"
-          else
-            shasum -a 256 "$archive" > "$archive.sha256"
-          fi
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $archive = "omni-${{ matrix.target }}.zip"
-          Compress-Archive -Path "target/${{ matrix.target }}/release/omni.exe" -DestinationPath $archive
-          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
-          "$hash  $archive" | Out-File "$archive.sha256" -Encoding ascii
-
-      - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            omni-${{ matrix.target }}.tar.gz
-            omni-${{ matrix.target }}.tar.gz.sha256
-            omni-${{ matrix.target }}.zip
-            omni-${{ matrix.target }}.zip.sha256
-          fail_on_unmatched_files: false
-
-  scripts:
-    name: attach install scripts
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Attach install scripts to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            install.sh
-            install.ps1
-
-  windows-gui:
-    name: build Windows GUI (WinUI 3, ${{ matrix.rid }})
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - rid: win-x64
-            platform: x64
-            target: x86_64-pc-windows-msvc
-          - rid: win-arm64
-            platform: arm64
-            target: aarch64-pc-windows-msvc
-    defaults:
-      run:
-        working-directory: clients/omni-windows
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.0.x"
-
-      # Self-contained: the .zip carries the .NET runtime and the Windows App
-      # SDK, so end users download and run it — no .NET install — the same deal
-      # as the CLI. `-o publish` keeps the output path independent of the
-      # target-framework moniker.
-      - name: Publish (self-contained)
-        run: >
-          dotnet publish src/Omni.App/Omni.App.csproj
-          -c Release -r ${{ matrix.rid }} --self-contained
-          -p:Platform=${{ matrix.platform }} -o publish
-
-      - name: Package
-        shell: pwsh
-        run: |
-          $archive = "omni-gui-${{ matrix.target }}.zip"
-          Compress-Archive -Path "publish/*" -DestinationPath $archive
-          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
-          "$hash  $archive" | Out-File "$archive.sha256" -Encoding ascii
-
-      - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            clients/omni-windows/omni-gui-${{ matrix.target }}.zip
-            clients/omni-windows/omni-gui-${{ matrix.target }}.zip.sha256
-
-  desktop:
-    name: build desktop app (Tauri, ${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-apple-darwin
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
 
@@ -182,73 +60,84 @@ jobs:
           rustup default stable
           rustup target add ${{ matrix.target }}
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            omni/src-tauri
+
       - uses: oven-sh/setup-bun@v2
 
       - name: Install frontend dependencies
         working-directory: omni
         run: bun install --frozen-lockfile
 
-      # The app embeds the daemon and bundles the CLI beside it, both built from
-      # this same commit, so all three must report one version. `tauri build`
-      # checks this again itself; failing here makes the reason obvious.
+      # The app embeds the daemon and bundles the CLI, both built from this tag,
+      # so one install is one version. Checked before anything is built.
       - name: Version matches the daemon
         working-directory: omni
         run: bun run check-version
 
-      # Also stages the `omni` CLI as a sidecar, cross-built for this target, so
-      # installing the app installs the command too.
+      # Builds the CLI for this target and stages it as the app's sidecar, then
+      # bundles the app around it. Both release assets come out of this step.
       - name: Build
         working-directory: omni
         run: bun run tauri build --target ${{ matrix.target }}
 
-      # Bundle file names carry the version and Tauri's own arch spelling. They
-      # are renamed to the target triple so the release assets match the CLI's
-      # naming and a download is unambiguous.
-      - name: Package (macOS)
-        if: runner.os == 'macOS'
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
+          name="${{ matrix.os }}-${{ matrix.arch }}"
           bundle="omni/src-tauri/target/${{ matrix.target }}/release/bundle"
-          dmg=$(find "$bundle/dmg" -name '*.dmg' | head -1)
-          cp "$dmg" "omni-desktop-${{ matrix.target }}.dmg"
-          shasum -a 256 "omni-desktop-${{ matrix.target }}.dmg" > "omni-desktop-${{ matrix.target }}.dmg.sha256"
 
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          bundle="omni/src-tauri/target/${{ matrix.target }}/release/bundle"
-          appimage=$(find "$bundle/appimage" -name '*.AppImage' | head -1)
-          deb=$(find "$bundle/deb" -name '*.deb' | head -1)
-          cp "$appimage" "omni-desktop-${{ matrix.target }}.AppImage"
-          cp "$deb" "omni-desktop-${{ matrix.target }}.deb"
-          for f in "omni-desktop-${{ matrix.target }}.AppImage" "omni-desktop-${{ matrix.target }}.deb"; do
-            sha256sum "$f" > "$f.sha256"
-          done
+          # The CLI, archived rather than bare so the executable bit survives
+          # the download.
+          tar -czf "omni-cli-$name.tar.gz" -C "target/${{ matrix.target }}/release" omni
+
+          # The desktop app: a .dmg on macOS, an AppImage on Linux — the format
+          # each platform expects to be handed.
+          if [ "${{ matrix.os }}" = "macos" ]; then
+            cp "$(find "$bundle/dmg" -name '*.dmg' | head -1)" "omni-desktop-$name.dmg"
+          else
+            cp "$(find "$bundle/appimage" -name '*.AppImage' | head -1)" "omni-desktop-$name.AppImage"
+          fi
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $name = "${{ matrix.os }}-${{ matrix.arch }}"
           $bundle = "omni/src-tauri/target/${{ matrix.target }}/release/bundle"
-          $installer = Get-ChildItem -Path $bundle -Recurse -Include *.exe, *.msi | Select-Object -First 1
-          $name = "omni-desktop-${{ matrix.target }}$($installer.Extension)"
-          Copy-Item $installer.FullName $name
-          $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name" | Out-File "$name.sha256" -Encoding ascii
+
+          Compress-Archive -Path "target/${{ matrix.target }}/release/omni.exe" `
+            -DestinationPath "omni-cli-$name.zip"
+
+          $installer = Get-ChildItem -Path $bundle -Recurse -Include *.exe, *.msi |
+            Select-Object -First 1
+          Copy-Item $installer.FullName "omni-desktop-$name.exe"
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            omni-desktop-${{ matrix.target }}.dmg
-            omni-desktop-${{ matrix.target }}.dmg.sha256
-            omni-desktop-${{ matrix.target }}.AppImage
-            omni-desktop-${{ matrix.target }}.AppImage.sha256
-            omni-desktop-${{ matrix.target }}.deb
-            omni-desktop-${{ matrix.target }}.deb.sha256
-            omni-desktop-${{ matrix.target }}.exe
-            omni-desktop-${{ matrix.target }}.exe.sha256
-            omni-desktop-${{ matrix.target }}.msi
-            omni-desktop-${{ matrix.target }}.msi.sha256
+            omni-cli-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+            omni-cli-${{ matrix.os }}-${{ matrix.arch }}.zip
+            omni-desktop-${{ matrix.os }}-${{ matrix.arch }}.dmg
+            omni-desktop-${{ matrix.os }}-${{ matrix.arch }}.AppImage
+            omni-desktop-${{ matrix.os }}-${{ matrix.arch }}.exe
           fail_on_unmatched_files: false
+
+  scripts:
+    name: attach install scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Not builds — the two files the documented one-line installers fetch.
+      # Removing them would break `curl ... | sh`.
+      - name: Attach install scripts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            install.sh
+            install.ps1
