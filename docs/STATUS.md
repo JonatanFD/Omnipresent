@@ -5,8 +5,15 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-08-23 (**the cross-platform desktop client became a complete
-front end for the daemon and the CLI.**
+_Last updated: 2026-08-23 — **v0.8.0** (**the cross-platform desktop client became
+a complete front end for the daemon and the CLI, and is now released with it.**
+
+The release carries one more artifact than before: `omni-desktop-<target>`, an
+installer per platform that is the whole product in a single download — the
+daemon runs inside it and the `omni` CLI is bundled beside it, both built from
+the same tag. Because one install now means one version, the app, the daemon it
+embeds and the CLI it ships are checked against the workspace before a bundle is
+built, and the packaging build refuses to run if they have drifted apart.
 
 A third client landed alongside the two native ones: Tauri 2 + React under
 [`omni/`](../omni), targeting all three operating systems from one codebase. It
@@ -689,9 +696,15 @@ Everything below is known, deliberate, and ordered roughly by importance:
   wrong shape for a bundled app — removing it is the OS's job. What is arguably
   missing is a "forget everything" action that clears config, certificates and
   pinned peers without touching the app.
-- **The desktop client is not in the release workflow.** CI builds and packages
-  it on all three platforms, but `release.yml` still ships only the CLI, so no
-  bundle is attached to a release yet.
+- **The desktop client's releases are unsigned.** `release.yml` builds and
+  attaches an installer per platform, but nothing is code-signed or notarised,
+  so macOS Gatekeeper needs a right-click → Open and Windows SmartScreen warns.
+  Fixing it needs an Apple Developer ID, a Windows signing certificate, and a
+  notarisation step — credentials, not code.
+- **The desktop client ships one architecture per download.** Each target is
+  built and attached separately rather than as a macOS universal binary, so a
+  user has to pick. Merging the two Apple builds also means merging the two CLI
+  sidecars with `lipo`, which `stage-cli.mjs` does not do yet.
 - **Automatic reconnection.** `omni connect` between two real machines
   (Windows ↔ macOS) is validated and works, including clipboard. What is missing
   is recovery from a *dropped* link: when the connection fails (network blip,
