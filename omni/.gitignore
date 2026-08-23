@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# The omni CLI, built and staged into the bundle by scripts/stage-cli.mjs.
+# A build artifact of the workspace next door, not source.
+src-tauri/binaries
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

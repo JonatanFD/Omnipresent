@@ -1,0 +1,98 @@
+name: Desktop client
+
+# The cross-platform Tauri client lives outside the Cargo workspace and carries
+# its own quality gate (constraint 21 in docs/NATIVE_INTEGRATIONS.md). Both
+# halves are checked on every platform it targets: the Rust side that embeds the
+# daemon, and the TypeScript side that renders it.
+#
+# It also depends on the core crates by path, so a change to those can break it
+# without touching anything under omni/ — hence crates/ in the path filter.
+on:
+  push:
+    branches: [develop, master]
+    paths:
+      - "omni/**"
+      - "crates/**"
+      - ".github/workflows/client-desktop.yml"
+  pull_request:
+    paths:
+      - "omni/**"
+      - "crates/**"
+      - ".github/workflows/client-desktop.yml"
+
+concurrency:
+  group: client-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    name: build · test (Tauri)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The webview and its dependencies are not preinstalled on the Linux
+      # runner. macOS and Windows use the system webview and need nothing.
+      - name: Install Linux webview dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install Rust (stable, with rustfmt and clippy)
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt clippy
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omni/src-tauri
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        working-directory: omni
+        run: bun install --frozen-lockfile
+
+      # The client ships the daemon inside it, so one install is one version.
+      # Checked before anything is built, because a bundle that reports a
+      # version belonging to nothing is worse than a build that failed.
+      - name: Version matches the daemon
+        working-directory: omni
+        run: bun run check-version
+
+      - name: Test — the window
+        working-directory: omni
+        run: bun run test
+
+      - name: Typecheck and build the frontend
+        working-directory: omni
+        run: bun run build
+
+      - name: Format
+        working-directory: omni/src-tauri
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        working-directory: omni/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test — the embedded daemon and its bridge
+        working-directory: omni/src-tauri
+        run: cargo test
+
+      # Proves the whole thing packages, including the CLI sidecar: the bundle is
+      # the deliverable, and a client that tests clean but cannot be built is not
+      # something anyone can install.
+      - name: Build the app bundle
+        working-directory: omni
+        run: bun run tauri build --no-bundle

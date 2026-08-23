@@ -10,11 +10,13 @@
 //! untouched, and it means the window works just as well against a daemon that was
 //! already running when the app started.
 
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
 use std::time::Duration;
 
 use omni_runtime::ipc::{
-    Event, LayoutInfo, ModifierInfo, PeerInfo, Request, Response, StatusInfo, PROTOCOL_VERSION,
+    Event, LayoutInfo, ModifierInfo, PeerInfo, PendingInfo, Request, Response, StatusInfo,
+    PROTOCOL_VERSION,
 };
 use omni_runtime::ipc_transport::connect_blocking;
 use omni_runtime::Paths;
@@ -26,7 +28,10 @@ pub const STATUS_EVENT: &str = "daemon://status";
 pub const DISCONNECTED_EVENT: &str = "daemon://disconnected";
 
 /// Sends one request and reads the single response line it gets back.
-fn request(req: Request) -> Result<Response, String> {
+///
+/// Visible to the crate because the tray answers connection requests too: a
+/// waiting peer has to be acceptable without reopening the window.
+pub(crate) fn request(req: Request) -> Result<Response, String> {
     let paths = Paths::resolve().map_err(|e| e.to_string())?;
     let mut stream =
         connect_blocking(&paths).map_err(|_| "the daemon is not running".to_string())?;
@@ -187,20 +192,27 @@ pub fn clipboard_set(enabled: bool) -> Result<(), String> {
 /// The daemon pushes only when something changes, so an idle app does no work —
 /// which is the point of subscribing instead of polling `Status` on a timer.
 pub fn spawn_subscription(app: AppHandle) {
-    std::thread::spawn(move || loop {
-        match subscribe_once(&app) {
-            Ok(()) => {}
-            Err(_) => {
-                let _ = app.emit(DISCONNECTED_EVENT, ());
+    std::thread::spawn(move || {
+        // Which requests the user has already been told about, so reconnecting
+        // or an unrelated state change does not announce the same peer twice.
+        let mut announced: HashSet<String> = HashSet::new();
+
+        loop {
+            match subscribe_once(&app, &mut announced) {
+                Ok(()) => {}
+                Err(_) => {
+                    let _ = app.emit(DISCONNECTED_EVENT, ());
+                }
             }
+            // The daemon may still be starting, or may have been stopped on
+            // purpose. Retrying on a slow beat costs nothing and recovers on
+            // its own.
+            std::thread::sleep(Duration::from_secs(1));
         }
-        // The daemon may still be starting, or may have been stopped on purpose.
-        // Retrying on a slow beat costs nothing and recovers on its own.
-        std::thread::sleep(Duration::from_secs(1));
     });
 }
 
-fn subscribe_once(app: &AppHandle) -> Result<(), String> {
+fn subscribe_once(app: &AppHandle, announced: &mut HashSet<String>) -> Result<(), String> {
     let paths = Paths::resolve().map_err(|e| e.to_string())?;
     let mut stream = connect_blocking(&paths).map_err(|e| e.to_string())?;
 
@@ -219,8 +231,144 @@ fn subscribe_once(app: &AppHandle) -> Result<(), String> {
         // Unknown event variants are skipped rather than fatal, so a newer daemon
         // adding one does not knock the window offline.
         if let Ok(Event::Status(status)) = serde_json::from_str::<Event>(&line) {
+            // The tray and the notification come first: they are what reaches a
+            // user whose window is closed, which is the usual case.
+            crate::tray::sync(app, &status);
+            announce_new_requests(app, &status, announced);
             let _ = app.emit(STATUS_EVENT, status);
         }
     }
     Ok(())
+}
+
+/// Notifies about requests that have appeared since the last snapshot.
+///
+/// Split out and given its set explicitly so the "only once per peer" rule can
+/// be tested without a daemon or a desktop.
+fn announce_new_requests(app: &AppHandle, status: &StatusInfo, announced: &mut HashSet<String>) {
+    for request in new_requests(status, announced) {
+        crate::notify::incoming_request(app, &request.host);
+    }
+}
+
+/// The waiting requests not yet announced, updating `announced` to match the
+/// snapshot — so a request that is answered and later arrives again is
+/// announced again, while one that merely persists is not.
+fn new_requests(status: &StatusInfo, announced: &mut HashSet<String>) -> Vec<PendingInfo> {
+    let waiting: HashSet<String> = status
+        .pending
+        .iter()
+        .map(|request| request.fingerprint.clone())
+        .collect();
+
+    announced.retain(|fingerprint| waiting.contains(fingerprint));
+
+    let fresh: Vec<PendingInfo> = status
+        .pending
+        .iter()
+        .filter(|request| !announced.contains(&request.fingerprint))
+        .cloned()
+        .collect();
+
+    announced.extend(fresh.iter().map(|request| request.fingerprint.clone()));
+    fresh
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snapshot(pending: &[(&str, &str)]) -> StatusInfo {
+        StatusInfo {
+            fingerprint: "ours".into(),
+            port: 4733,
+            capturing: true,
+            clipboard_sharing: false,
+            sessions: Vec::new(),
+            pending: pending
+                .iter()
+                .map(|(host, fingerprint)| PendingInfo {
+                    host: (*host).to_string(),
+                    fingerprint: (*fingerprint).to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_first_request_is_announced() {
+        let mut announced = HashSet::new();
+
+        let fresh = new_requests(&snapshot(&[("studio", "aa")]), &mut announced);
+
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].host, "studio");
+    }
+
+    #[test]
+    fn a_request_that_is_still_waiting_is_not_announced_again() {
+        // The daemon pushes a whole snapshot on every change, so the same
+        // pending request arrives many times over. Announcing each one would
+        // notify repeatedly for a single peer.
+        let mut announced = HashSet::new();
+        let status = snapshot(&[("studio", "aa")]);
+
+        new_requests(&status, &mut announced);
+        let second = new_requests(&status, &mut announced);
+
+        assert!(second.is_empty());
+    }
+
+    #[test]
+    fn only_the_peer_that_is_new_is_announced() {
+        let mut announced = HashSet::new();
+        new_requests(&snapshot(&[("studio", "aa")]), &mut announced);
+
+        let fresh = new_requests(
+            &snapshot(&[("studio", "aa"), ("laptop", "bb")]),
+            &mut announced,
+        );
+
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].host, "laptop");
+    }
+
+    #[test]
+    fn a_peer_that_asks_again_after_being_answered_is_announced_again() {
+        // Accepting or rejecting clears the request. If the same machine asks
+        // later, that is a new decision to make and has to be surfaced.
+        let mut announced = HashSet::new();
+        new_requests(&snapshot(&[("studio", "aa")]), &mut announced);
+
+        new_requests(&snapshot(&[]), &mut announced);
+        let again = new_requests(&snapshot(&[("studio", "aa")]), &mut announced);
+
+        assert_eq!(again.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_snapshot_forgets_what_was_announced() {
+        let mut announced = HashSet::new();
+        new_requests(&snapshot(&[("studio", "aa")]), &mut announced);
+
+        new_requests(&snapshot(&[]), &mut announced);
+
+        assert!(announced.is_empty());
+    }
+
+    #[test]
+    fn peers_are_told_apart_by_fingerprint_not_name() {
+        // Two machines can report the same host name; the fingerprint is what
+        // actually identifies one. Keying on the name would silence the second.
+        let mut announced = HashSet::new();
+        new_requests(&snapshot(&[("localhost", "aa")]), &mut announced);
+
+        let fresh = new_requests(
+            &snapshot(&[("localhost", "aa"), ("localhost", "bb")]),
+            &mut announced,
+        );
+
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].fingerprint, "bb");
+    }
 }

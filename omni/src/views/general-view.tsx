@@ -8,6 +8,7 @@ import {
   useDaemonError,
   useDaemonStore,
   useDaemonVersion,
+  useEmbedded,
   useStatus,
 } from "@/stores/daemon-store";
 
@@ -29,13 +30,16 @@ export function GeneralView() {
   const connection = useConnection();
   const status = useStatus();
   const version = useDaemonVersion();
+  const embedded = useEmbedded();
   const error = useDaemonError();
 
   const refresh = useDaemonStore((s) => s.refresh);
+  const startDaemon = useDaemonStore((s) => s.startDaemon);
   const stopDaemon = useDaemonStore((s) => s.stopDaemon);
 
   const isConnected = connection === "connected";
   const isIncompatible = connection === "incompatible";
+  const isBusy = connection === "connecting";
   const StatusIcon = CONNECTION_ICON[connection];
 
   if (isIncompatible) {
@@ -66,18 +70,28 @@ export function GeneralView() {
         </SettingsRow>
         <SettingsRow
           label="Controls"
-          description="The daemon runs inside this app. Quitting stops input sharing."
+          description={
+            embedded
+              ? "The daemon runs inside this app. Quitting stops input sharing."
+              : "Using a daemon that was already running. Quitting this app leaves it running."
+          }
         >
+          {isConnected ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={isBusy}
+              onClick={() => void stopDaemon()}
+            >
+              Stop
+            </Button>
+          ) : (
+            <Button size="sm" disabled={isBusy} onClick={() => void startDaemon()}>
+              Start
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => void refresh()}>
             Reconnect
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={!isConnected}
-            onClick={() => void stopDaemon()}
-          >
-            Stop
           </Button>
         </SettingsRow>
       </SettingsSection>
