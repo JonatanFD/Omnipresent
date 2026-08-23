@@ -68,11 +68,17 @@ The quality gate, which is what CI runs:
 ```sh
 bun run test                      # the window
 bun run build                     # typecheck and bundle the frontend
+bun run stage-cli                 # see below — cargo will not compile without it
 cd src-tauri
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test                        # the embedded daemon and its bridge
 ```
+
+`stage-cli` is needed before **any** cargo command here, not just packaging:
+Tauri's build script checks that every `externalBin` exists, so the crate does
+not compile until the sidecar has been staged. `bun run tauri dev` and
+`tauri build` do it for you; a bare `cargo test` does not.
 
 Packaging also builds and stages the CLI sidecar
 ([`scripts/stage-cli.mjs`](scripts/stage-cli.mjs)):
