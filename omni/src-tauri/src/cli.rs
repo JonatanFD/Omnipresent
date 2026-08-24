@@ -1,15 +1,21 @@
 //! Putting the `omni` command on the user's PATH.
 //!
-//! The app bundles the CLI as a sidecar binary, so a single install gives both
-//! the window and the command. It is not copied onto PATH automatically: that
-//! writes to a directory outside the bundle, which is the user's decision to
-//! make, not something an app should do while it is starting.
+//! The app bundles the CLI as a sidecar binary and installs it on first run, so
+//! one install really is the whole product — the window, the daemon inside it,
+//! and the command. It goes to a directory the user already owns, so nothing
+//! needs administrator rights.
+//!
+//! Only when nothing is there yet. A command that is already installed is left
+//! alone: it may be newer than this app, or put there deliberately by
+//! `install.sh`, and silently overwriting either would be a downgrade the user
+//! never asked for. Replacing it is offered in the window instead.
 //!
 //! The destination is the same one `install.sh` and `install.ps1` document, and
 //! honours the same `OMNI_INSTALL_DIR` override — so a machine that already has
 //! the CLI gets it replaced in place rather than shadowed by a second copy on a
 //! different part of the PATH.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// The sidecar's name once bundled. Tauri strips the target triple it is staged
@@ -95,10 +101,43 @@ fn contains_dir(path: &std::ffi::OsStr, dir: &Path) -> bool {
     std::env::split_paths(path).any(|entry| !entry.as_os_str().is_empty() && entry == dir)
 }
 
+/// The PATH a command typed in a terminal would actually be looked up in.
+///
+/// Not this process's PATH. An app launched from Finder or the Dock inherits
+/// launchd's minimal `/usr/bin:/bin:/usr/sbin:/sbin`, which almost never
+/// contains the install directory — so checking it reported "not on your PATH"
+/// to people whose shell had it all along. Asking the login shell is the only
+/// way to see what the user will really get, and it is what the user cares
+/// about: whether typing `omni` works.
+#[cfg(unix)]
+fn shell_path() -> Option<OsString> {
+    // A login shell, because that is what sources the profile that sets PATH.
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let output = std::process::Command::new(shell)
+        .args(["-l", "-c", "printf %s \"$PATH\""])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    let path = path.trim();
+    (!path.is_empty()).then(|| OsString::from(path))
+}
+
+/// On Windows a GUI process inherits the real user PATH, so there is nothing to
+/// go and ask for.
+#[cfg(windows)]
+fn shell_path() -> Option<OsString> {
+    std::env::var_os("PATH")
+}
+
 #[tauri::command]
 pub fn cli_status() -> Result<CliStatus, String> {
     let target = install_dir()?;
-    let on_path = std::env::var_os("PATH").is_some_and(|path| contains_dir(&path, &target));
+    let on_path = shell_path()
+        .or_else(|| std::env::var_os("PATH"))
+        .is_some_and(|path| contains_dir(&path, &target));
 
     Ok(CliStatus {
         installed: target.join(CLI_NAME).exists(),
@@ -106,6 +145,23 @@ pub fn cli_status() -> Result<CliStatus, String> {
         available: sidecar().is_ok_and(|path| path.exists()),
         target: target.join(CLI_NAME).display().to_string(),
     })
+}
+
+/// Installs the command if nothing is there yet. Called once at startup.
+///
+/// Best-effort and silent: the window works perfectly well without the command,
+/// so a read-only home directory or a missing sidecar in a development build is
+/// not worth interrupting a launch over. The System pane shows the outcome
+/// either way.
+pub fn install_if_absent() {
+    let Ok(status) = cli_status() else { return };
+    if status.installed || !status.available {
+        return;
+    }
+    if let Err(error) = cli_install() {
+        // Never carries key material — it is a path and an OS error.
+        eprintln!("omni: could not install the command line tool ({error})");
+    }
 }
 
 /// Copies the bundled CLI into the install directory.
@@ -206,6 +262,31 @@ mod tests {
         let path = OsString::from(if cfg!(windows) { ";;" } else { "::" });
 
         assert!(!contains_dir(&path, Path::new("/home/someone/.local/bin")));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_shell_path_is_read_from_the_login_shell_not_this_process() {
+        // The whole point: a GUI process's PATH is launchd's minimal one, and
+        // the answer has to come from the shell instead. If this returns
+        // something, it must at least look like a PATH.
+        if let Some(path) = shell_path() {
+            let entries: Vec<_> = std::env::split_paths(&path).collect();
+            assert!(!entries.is_empty(), "a PATH has at least one entry");
+            assert!(
+                entries.iter().any(|e| e.is_absolute()),
+                "a real PATH has absolute entries, got {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_already_installed_is_left_alone() {
+        // Auto-install must not overwrite: what is there may be newer than this
+        // app, or put there deliberately by install.sh. `install_if_absent`
+        // returns without touching anything, which in a test build — where
+        // there is no sidecar either — means it simply does nothing.
+        install_if_absent();
     }
 
     #[test]
