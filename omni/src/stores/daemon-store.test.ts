@@ -234,7 +234,7 @@ describe("health", () => {
   });
 });
 
-describe("doctor and the command line", () => {
+describe("doctor and the daemon log", () => {
   it("stores the checks it was given", async () => {
     answers.daemon_doctor = [
       { name: "accessibility permission", ok: false, detail: "not granted" },
@@ -255,27 +255,26 @@ describe("doctor and the command line", () => {
     expect(useDaemonStore.getState().error).toContain("state directory");
   });
 
-  it("keeps the installed command's location after installing", async () => {
-    answers.cli_install = {
-      target: "/home/someone/.local/bin/omni",
-      installed: true,
-      on_path: false,
-      available: true,
+  it("keeps the daemon log it was given", async () => {
+    answers.daemon_log = {
+      path: "/home/someone/.config/omni/daemon.log",
+      lines: ["daemon starting", "QUIC endpoint: address already in use"],
     };
 
-    await useDaemonStore.getState().installCli();
+    await useDaemonStore.getState().readLog();
 
-    const cli = useDaemonStore.getState().cli;
-    expect(cli?.installed).toBe(true);
-    expect(cli?.on_path).toBe(false);
+    expect(useDaemonStore.getState().log?.lines).toHaveLength(2);
   });
 
-  it("reports a refused install rather than claiming success", async () => {
-    failures.cli_install = "cannot write /usr/local/bin/omni: permission denied";
+  it("does not wipe the error that made the user open the log", async () => {
+    // The log is read *because* something failed. Clearing the reason on a
+    // successful read would remove the very thing being investigated.
+    answers.daemon_log = { path: "/tmp/daemon.log", lines: ["boom"] };
+    useDaemonStore.setState({ error: "The daemon stopped: address in use" });
 
-    await useDaemonStore.getState().installCli();
+    await useDaemonStore.getState().readLog();
 
-    expect(useDaemonStore.getState().cli).toBeNull();
-    expect(useDaemonStore.getState().error).toContain("permission denied");
+    expect(useDaemonStore.getState().error).toContain("address in use");
+    expect(useDaemonStore.getState().log?.lines).toEqual(["boom"]);
   });
 });

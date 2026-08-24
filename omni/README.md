@@ -21,16 +21,10 @@ re-implements none of the decisions the daemon owns — trust, layout maths,
 fingerprinting. It works unchanged against a daemon that was already running: if
 one owns the socket, the embedded one stands down and the window talks to that.
 
-**The `omni` command ships with it, and installs itself.** The CLI is bundled as
-a Tauri sidecar and copied onto the PATH the first time the app runs, into the
-same location [`install.sh`](../install.sh) and [`install.ps1`](../install.ps1)
-use and honouring the same `OMNI_INSTALL_DIR` override — a directory the user
-owns, so no administrator rights.
-
-Only when nothing is there yet. A command already installed is left alone: it
-may be newer than this app, or have been put there deliberately by the install
-script, and overwriting either would be a silent downgrade. *System → Command
-line* shows where it stands and replaces it on request.
+**Nothing is installed alongside it.** The app does not copy a command onto the
+PATH, does not write outside its own bundle, and has no second component to keep
+in step. The `omni` CLI is still published as its own download for headless
+machines, but it is a separate product — this app neither ships nor manages it.
 
 **It lives in the tray.** Sharing a keyboard and mouse is a background job, so
 closing the window hides it rather than quitting. A connection request usually
@@ -74,27 +68,17 @@ The quality gate, which is what CI runs:
 ```sh
 bun run test                      # the window
 bun run build                     # typecheck and bundle the frontend
-bun run stage-cli                 # see below — cargo will not compile without it
 cd src-tauri
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test                        # the embedded daemon and its bridge
 ```
 
-`stage-cli` is needed before **any** cargo command here, not just packaging:
-Tauri's build script checks that every `externalBin` exists, so the crate does
-not compile until the sidecar has been staged. `bun run tauri dev` and
-`tauri build` do it for you; a bare `cargo test` does not.
-
-Packaging also builds and stages the CLI sidecar
-([`scripts/stage-cli.mjs`](scripts/stage-cli.mjs)):
+Packaging:
 
 ```sh
 bun run tauri build
 ```
-
-A development build has no staged sidecar, so *Install* under **System → Command
-line** is disabled and says why.
 
 ## Where things are
 
@@ -103,12 +87,11 @@ line** is disabled and says why.
 | `src-tauri/src/daemon.rs` | Starting, stopping and supervising the embedded daemon |
 | `src-tauri/src/ipc.rs` | The pass-through to the daemon's IPC, and the live subscription |
 | `src-tauri/src/diagnostics.rs` | `omni doctor`, run in-process |
-| `src-tauri/src/cli.rs` | The bundled `omni` command and installing it on PATH |
 | `src-tauri/src/tray.rs` | The tray icon, and answering requests from it |
 | `src-tauri/src/notify.rs` | The one notification worth interrupting for |
 | `src/lib/ipc.ts` | The TypeScript mirror of the daemon's IPC types |
 | `src/stores/daemon-store.ts` | The daemon's last snapshot, and every command |
-| `src/views/doctor-view.tsx` | The health verdict and the checks behind it |
+| `src/views/doctor-view.tsx` | The health verdict, the checks, and the daemon log |
 | `src/views/` | One file per section |
 
 It sits **outside the Cargo workspace**: `src-tauri` declares its own

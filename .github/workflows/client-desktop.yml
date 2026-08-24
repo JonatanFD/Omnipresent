@@ -78,14 +78,6 @@ jobs:
         working-directory: omni
         run: bun run build
 
-      # Before any cargo command, not just the packaging build. Tauri's build
-      # script checks that every `externalBin` exists, so the crate does not
-      # compile at all until the CLI sidecar has been staged — and `binaries/`
-      # is a build artifact, so a fresh checkout never has one.
-      - name: Stage the CLI sidecar
-        working-directory: omni
-        run: bun run stage-cli
-
       - name: Format
         working-directory: omni/src-tauri
         run: cargo fmt --all --check

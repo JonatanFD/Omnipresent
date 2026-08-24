@@ -2,7 +2,8 @@ import { CheckCircle2, HelpCircle, TriangleAlert, XCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { SettingsRow, SettingsSection } from "@/components/settings";
-import { health, useChecks, useDaemonStore } from "@/stores/daemon-store";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { health, useChecks, useDaemonStore, useLog } from "@/stores/daemon-store";
 
 /**
  * `omni doctor`, in the window.
@@ -68,7 +69,53 @@ export function DoctorView() {
           </Button>
         </SettingsRow>
       </SettingsSection>
+
+      <DaemonLogSection />
     </div>
+  );
+}
+
+/**
+ * The daemon's own log.
+ *
+ * Without it, a daemon that refuses to start looks identical from the window
+ * whatever the reason — "not running" — and the person who most needs the
+ * answer is the one who does not know a log file exists, let alone where. The
+ * checks above say what is wrong with the *machine*; this says what went wrong
+ * with the *daemon*.
+ */
+function DaemonLogSection() {
+  const log = useLog();
+  const readLog = useDaemonStore((s) => s.readLog);
+
+  return (
+    <SettingsSection
+      title="Daemon log"
+      footer={log?.path ? `Written to ${log.path}` : undefined}
+    >
+      {log && log.lines.length > 0 ? (
+        <div className="px-4 py-3">
+          <ScrollArea className="max-h-64 rounded-md border bg-muted/40">
+            <pre className="w-max min-w-full p-3 font-mono text-[11px] leading-relaxed">
+              {log.lines.join("\n")}
+            </pre>
+          </ScrollArea>
+        </div>
+      ) : null}
+
+      <SettingsRow
+        label={log ? "Reload" : "Read the log"}
+        description={
+          log && log.lines.length === 0
+            ? "Nothing logged yet — the daemon has not run on this machine."
+            : "The last few hundred lines, newest at the bottom."
+        }
+      >
+        <Button variant="outline" size="sm" onClick={() => void readLog()}>
+          {log ? "Reload" : "Read log"}
+        </Button>
+      </SettingsRow>
+    </SettingsSection>
   );
 }
 
