@@ -33,6 +33,14 @@ pub fn run() {
             tray::create(handle)?;
             ipc::spawn_subscription(handle.clone());
 
+            // One install is meant to be the whole product, and the command is
+            // part of that. It goes to a directory the user owns, so no
+            // administrator rights, and only when nothing is there already.
+            // Off the main thread: it copies several megabytes and asks the
+            // login shell for its PATH, neither of which should hold up the
+            // window appearing.
+            std::thread::spawn(cli::install_if_absent);
+
             // A failure here is not fatal, and usually is not even a failure: a
             // daemon started by `omni start`, or by another copy of this app,
             // owns the socket and ours stands down. The window then talks to the

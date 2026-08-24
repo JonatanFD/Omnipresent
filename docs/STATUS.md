@@ -5,7 +5,7 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-08-23 — **v0.8.2** (**the cross-platform desktop client became
+_Last updated: 2026-08-23 — **v0.8.3** (**the cross-platform desktop client became
 a complete front end for the daemon and the CLI, and is now released with it.**
 
 The release is now **six assets, three jobs**: `omni-desktop-<os>-<arch>` — the
@@ -64,11 +64,20 @@ carries the waiting requests with Accept and Reject per peer, the count is in th
 tooltip, and a notification announces each new one — once per peer, tracked by
 fingerprint rather than host name, because two machines can report the same name.
 
-**The `omni` command ships inside the app.** There was no `externalBin`, so
-installing the app gave the window and no command. The CLI is now bundled as a
-sidecar, staged by a build script, and installable onto the PATH from System —
-into the same directory the install scripts use, honouring the same
-`OMNI_INSTALL_DIR`.
+**The `omni` command ships inside the app and installs itself.** There was no
+`externalBin`, so installing the app gave the window and no command. The CLI is
+now bundled as a sidecar, staged by a build script, and copied onto the PATH the
+first time the app runs — into the same directory the install scripts use,
+honouring the same `OMNI_INSTALL_DIR`, and owned by the user so nothing needs
+administrator rights. It was briefly a button the user had to find, which meant
+"one install is the whole product" was not true of the thing people actually
+installed. A command already on disk is still left alone: it may be newer than
+the app, and overwriting it would be a silent downgrade.
+
+Checking whether the install directory is on the PATH now asks the **login
+shell** rather than reading this process's environment. A GUI app launched from
+Finder inherits launchd's minimal `/usr/bin:/bin:/usr/sbin:/sbin`, so the pane
+told people their PATH was missing a directory their shell had had all along.
 
 Also: the per-peer modifier swap was plumbed end to end but surfaced nowhere, and
 now has a control next to the layout edge; the app and daemon versions are shown
