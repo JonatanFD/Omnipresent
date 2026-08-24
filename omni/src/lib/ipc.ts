@@ -89,15 +89,11 @@ export interface CheckInfo {
   detail: string;
 }
 
-/** Where the `omni` command is, or could be. */
-export interface CliStatus {
-  /** Where it would be installed to. */
-  target: string;
-  installed: boolean;
-  /** Whether that directory is on the PATH of the session that launched us. */
-  on_path: boolean;
-  /** False in a development build, where no CLI has been bundled. */
-  available: boolean;
+/** The daemon's own log, which is the only place a startup failure explains itself. */
+export interface DaemonLog {
+  path: string;
+  /** Most recent lines, oldest first. Empty when the daemon has never run. */
+  lines: string[];
 }
 
 /** Why the embedded daemon stopped. */
@@ -127,6 +123,8 @@ export const daemon = {
   embedded: () => invoke<boolean>("daemon_embedded"),
   /** The permission and environment checks behind `omni doctor`. */
   doctor: () => invoke<CheckInfo[]>("daemon_doctor"),
+  /** The tail of the daemon's log. */
+  log: () => invoke<DaemonLog>("daemon_log"),
 
   connect: (host: string) => invoke<void>("peer_connect", { host }),
   disconnect: (host: string) => invoke<void>("peer_disconnect", { host }),
@@ -146,11 +144,9 @@ export const daemon = {
   setClipboard: (enabled: boolean) => invoke<void>("clipboard_set", { enabled }),
 };
 
-/** This installation: the app's own version, and the bundled `omni` command. */
+/** This installation. Everything else lives inside the app itself. */
 export const installation = {
   version: () => invoke<string>("app_version"),
-  cli: () => invoke<CliStatus>("cli_status"),
-  installCli: () => invoke<CliStatus>("cli_install"),
 };
 
 /** Turns whatever `invoke` rejected with into something showable. */
