@@ -5,7 +5,7 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-08-23 — **v0.8.2** (**the cross-platform desktop client became
+_Last updated: 2026-08-23 — **v0.8.3** (**the cross-platform desktop client became
 a complete front end for the daemon and the CLI, and is now released with it.**
 
 The release is now **six assets, three jobs**: `omni-desktop-<os>-<arch>` — the
