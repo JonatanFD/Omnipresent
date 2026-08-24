@@ -21,10 +21,16 @@ re-implements none of the decisions the daemon owns — trust, layout maths,
 fingerprinting. It works unchanged against a daemon that was already running: if
 one owns the socket, the embedded one stands down and the window talks to that.
 
-**The `omni` command ships with it.** The CLI is bundled as a Tauri sidecar and
-can be copied onto the PATH from *System → Command line*, into the same location
-[`install.sh`](../install.sh) and [`install.ps1`](../install.ps1) use, honouring
-the same `OMNI_INSTALL_DIR` override.
+**The `omni` command ships with it, and installs itself.** The CLI is bundled as
+a Tauri sidecar and copied onto the PATH the first time the app runs, into the
+same location [`install.sh`](../install.sh) and [`install.ps1`](../install.ps1)
+use and honouring the same `OMNI_INSTALL_DIR` override — a directory the user
+owns, so no administrator rights.
+
+Only when nothing is there yet. A command already installed is left alone: it
+may be newer than this app, or have been put there deliberately by the install
+script, and overwriting either would be a silent downgrade. *System → Command
+line* shows where it stands and replaces it on request.
 
 **It lives in the tray.** Sharing a keyboard and mouse is a background job, so
 closing the window hides it rather than quitting. A connection request usually

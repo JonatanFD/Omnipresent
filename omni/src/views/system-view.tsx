@@ -55,7 +55,7 @@ function CommandLineSection() {
   return (
     <SettingsSection
       title="Command line"
-      footer="The same omni command the CLI install scripts provide, from inside this app."
+      footer="Installed automatically the first time this app runs, unless a command was already there — one that is may be newer than this app, so it is left alone and replacing it is the button above."
     >
       <SettingsRow
         className="items-start"
