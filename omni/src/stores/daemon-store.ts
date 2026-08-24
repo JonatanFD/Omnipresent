@@ -8,8 +8,8 @@ import {
   errorMessage,
   installation,
   type CheckInfo,
-  type CliStatus,
   type DaemonExit,
+  type DaemonLog,
   type Edge,
   type LayoutInfo,
   type ModifierInfo,
@@ -49,7 +49,8 @@ interface DaemonState {
   embedded: boolean;
   /** The last `doctor` run, or null if it has not been run yet. */
   checks: CheckInfo[] | null;
-  cli: CliStatus | null;
+  /** The tail of the daemon's log, or null if it has not been read yet. */
+  log: DaemonLog | null;
   /** The last failure, for showing the user. Never holds key material. */
   error: string | null;
 }
@@ -69,9 +70,8 @@ interface DaemonActions {
   startDaemon: () => Promise<void>;
   stopDaemon: () => Promise<void>;
   runDoctor: () => Promise<void>;
-  /** Reads where the `omni` command stands, without installing anything. */
-  refreshCli: () => Promise<void>;
-  installCli: () => Promise<void>;
+  /** Reads the tail of the daemon's log. */
+  readLog: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -85,7 +85,7 @@ const initialState: DaemonState = {
   appVersion: "",
   embedded: false,
   checks: null,
-  cli: null,
+  log: null,
   error: null,
 };
 
@@ -182,7 +182,6 @@ export const useDaemonStore = create<DaemonState & DaemonActions>()((set, get) =
       } catch {
         // Leaves the version blank rather than blocking the whole window.
       }
-      void get().refreshCli();
       // Run once at startup so the sidebar can flag a problem without the user
       // having to go looking for one. They are local permission queries and a
       // single IPC round trip, so this costs nothing on an idle app.
@@ -287,20 +286,13 @@ export const useDaemonStore = create<DaemonState & DaemonActions>()((set, get) =
       }
     },
 
-    installCli: async () => {
+    readLog: async () => {
       try {
-        set({ cli: await installation.installCli(), error: null });
+        // Deliberately does not clear `error`: the log is usually read *because*
+        // something failed, and wiping the reason would defeat the point.
+        set({ log: await daemon.log() });
       } catch (error) {
         set({ error: errorMessage(error) });
-      }
-    },
-
-    refreshCli: async () => {
-      try {
-        set({ cli: await installation.cli() });
-      } catch {
-        // A missing CLI is shown as "not installed" by the pane; a failure to
-        // even ask is not worth an error banner.
       }
     },
 
@@ -331,7 +323,7 @@ export const useChecks = (): CheckInfo[] | null => useDaemonStore((s) => s.check
 /** How many checks are failing — what the sidebar badges. */
 export const useFailingChecks = (): number =>
   useDaemonStore((s) => health(s.checks).failing);
-export const useCli = (): CliStatus | null => useDaemonStore((s) => s.cli);
+export const useLog = (): DaemonLog | null => useDaemonStore((s) => s.log);
 
 export const useSessions = (): SessionInfo[] =>
   useDaemonStore((s) => s.status?.sessions ?? EMPTY_SESSIONS);

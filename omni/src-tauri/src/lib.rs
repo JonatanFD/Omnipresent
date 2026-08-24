@@ -1,12 +1,14 @@
 //! The desktop client.
 //!
-//! The daemon runs inside this process, so installing the app is the whole
-//! installation — there is no second thing to set up, and the `omni` command
-//! ships with it (see [`cli`]). The window is still only a client of the
-//! daemon's IPC surface (see [`ipc`]); embedding the daemon changes where it
-//! runs, not who owns the state.
+//! Everything is in here. The daemon is compiled into this binary and runs on a
+//! background thread of this process, so installing the app is the whole
+//! installation — nothing is copied anywhere else, nothing is put on the PATH,
+//! and there is no second thing to keep in step. Closing the window leaves it
+//! running in the tray; quitting stops the daemon with it.
+//!
+//! The window is still only a client of the daemon's IPC surface (see [`ipc`]):
+//! embedding the daemon changes where it runs, not who owns the state.
 
-mod cli;
 mod daemon;
 mod diagnostics;
 mod ipc;
@@ -16,6 +18,14 @@ mod tray;
 use tauri::{Manager, WindowEvent};
 
 use daemon::Supervisor;
+
+/// The app's version. Also the daemon's, since they are one binary — but the
+/// window reports them separately, because it may be talking to a daemon that
+/// was already running and is a different build.
+#[tauri::command]
+fn app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,19 +43,11 @@ pub fn run() {
             tray::create(handle)?;
             ipc::spawn_subscription(handle.clone());
 
-            // One install is meant to be the whole product, and the command is
-            // part of that. It goes to a directory the user owns, so no
-            // administrator rights, and only when nothing is there already.
-            // Off the main thread: it copies several megabytes and asks the
-            // login shell for its PATH, neither of which should hold up the
-            // window appearing.
-            std::thread::spawn(cli::install_if_absent);
-
             // A failure here is not fatal, and usually is not even a failure: a
-            // daemon started by `omni start`, or by another copy of this app,
-            // owns the socket and ours stands down. The window then talks to the
-            // one that is there, which is what we want. Either way the outcome
-            // arrives as an event rather than being swallowed.
+            // daemon started by another copy of this app owns the socket and
+            // ours stands down. The window then talks to the one that is there.
+            // Either way the outcome arrives as an event rather than being
+            // swallowed, so a daemon that genuinely could not start says why.
             let _ = app.state::<Supervisor>().start(handle.clone());
 
             Ok(())
@@ -59,12 +61,11 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            app_version,
             daemon::daemon_start,
             daemon::daemon_embedded,
             diagnostics::daemon_doctor,
-            cli::cli_status,
-            cli::cli_install,
-            cli::app_version,
+            diagnostics::daemon_log,
             ipc::daemon_status,
             ipc::daemon_hello,
             ipc::daemon_stop,

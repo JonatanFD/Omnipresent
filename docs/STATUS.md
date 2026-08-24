@@ -5,7 +5,7 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-08-23 — **v0.8.3** (**the cross-platform desktop client became
+_Last updated: 2026-08-23 — **v0.9.0** (**the cross-platform desktop client became
 a complete front end for the daemon and the CLI, and is now released with it.**
 
 The release is now **six assets, three jobs**: `omni-desktop-<os>-<arch>` — the
@@ -64,20 +64,23 @@ carries the waiting requests with Accept and Reject per peer, the count is in th
 tooltip, and a notification announces each new one — once per peer, tracked by
 fingerprint rather than host name, because two machines can report the same name.
 
-**The `omni` command ships inside the app and installs itself.** There was no
-`externalBin`, so installing the app gave the window and no command. The CLI is
-now bundled as a sidecar, staged by a build script, and copied onto the PATH the
-first time the app runs — into the same directory the install scripts use,
-honouring the same `OMNI_INSTALL_DIR`, and owned by the user so nothing needs
-administrator rights. It was briefly a button the user had to find, which meant
-"one install is the whole product" was not true of the thing people actually
-installed. A command already on disk is still left alone: it may be newer than
-the app, and overwriting it would be a silent downgrade.
+**The app is self-contained, and installs nothing alongside itself.** It went
+through two wrong answers first. The CLI was bundled as a sidecar behind a button
+nobody would find, which made "one install is the whole product" untrue of what
+people actually installed; then it was installed onto the PATH automatically,
+which meant an app writing outside its own bundle and a second copy of the binary
+to keep in step. Neither was worth the machinery. The daemon is compiled into the
+app and runs on a thread of it, the window talks to it over the same IPC, and
+that is the whole of it — no sidecar, no PATH, nothing to drift.
 
-Checking whether the install directory is on the PATH now asks the **login
-shell** rather than reading this process's environment. A GUI app launched from
-Finder inherits launchd's minimal `/usr/bin:/bin:/usr/sbin:/sbin`, so the pane
-told people their PATH was missing a directory their shell had had all along.
+The `omni` CLI is still published for headless machines. It is simply a separate
+product now: this app neither ships nor manages it.
+
+**The daemon's log is readable from the Doctor pane.** A daemon that refuses to
+start looked identical from the window whatever the cause — "not running" — and
+the person who most needs the reason is the least likely to know a log file
+exists or where. The checks say what is wrong with the machine; the log says what
+went wrong with the daemon.
 
 Also: the per-peer modifier swap was plumbed end to end but surfaced nowhere, and
 now has a control next to the layout edge; the app and daemon versions are shown
