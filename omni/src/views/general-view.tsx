@@ -9,6 +9,7 @@ import {
   useDaemonStore,
   useDaemonVersion,
   useEmbedded,
+  useLocalAddress,
   useStatus,
 } from "@/stores/daemon-store";
 
@@ -31,6 +32,7 @@ export function GeneralView() {
   const status = useStatus();
   const version = useDaemonVersion();
   const embedded = useEmbedded();
+  const localAddress = useLocalAddress();
   const error = useDaemonError();
 
   const refresh = useDaemonStore((s) => s.refresh);
@@ -109,6 +111,16 @@ export function GeneralView() {
             <Badge variant={status.capturing ? "default" : "secondary"}>
               {status.capturing ? "Active" : "Target only"}
             </Badge>
+          </SettingsRow>
+          {/* What the other machine types. Without it the user has to go and
+              find their own IP, which is the first thing anyone gets stuck on. */}
+          <SettingsRow
+            label="This machine's address"
+            description="Run `omni connect` with this on the other machine, or type it into its Connect box."
+          >
+            <span className="font-mono text-xs select-all">
+              {localAddress ?? "no network"}
+            </span>
           </SettingsRow>
           <SettingsRow label="Port">
             <span className="font-mono text-xs text-muted-foreground">{status.port}</span>

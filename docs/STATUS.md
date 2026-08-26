@@ -5,8 +5,11 @@ module boundaries, see [`ARCHITECTURE.md`](ARCHITECTURE.md); for product scope
 and rules, see [`../CLAUDE.md`](../CLAUDE.md) and
 [`../.claude/rules/constrains.md`](../.claude/rules/constrains.md).
 
-_Last updated: 2026-08-23 — **v0.9.0** (**the cross-platform desktop client became
-a complete front end for the daemon and the CLI, and is now released with it.**
+_Last updated: 2026-08-26 — **v0.9.1** (**the desktop app now shows this
+machine's local address, asks for the Accessibility permission itself instead
+of just reporting it, and gets peers, placements and modifier swaps in one
+status snapshot. The clipboard adapter caches its handle and self-heals if the
+display starts after the daemon.**)_
 
 The release is now **six assets, three jobs**: `omni-desktop-<os>-<arch>` — the
 whole product in one download, the daemon running inside the app and the `omni`

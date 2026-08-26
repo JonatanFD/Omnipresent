@@ -39,12 +39,13 @@ export type ConnectionState =
 interface DaemonState {
   connection: ConnectionState;
   status: StatusInfo | null;
-  peers: PeerInfo[];
-  placements: LayoutInfo[];
-  swaps: ModifierInfo[];
   /** The daemon's version, which is not this app's when it did not start it. */
   daemonVersion: string;
   appVersion: string;
+  /** This machine's address on the local network, for a peer to dial. */
+  localAddress: string | null;
+  /** Hosts a connection is being requested from, so the UI can show progress. */
+  connecting: string[];
   /** Whether the daemon being talked to is the one inside this app. */
   embedded: boolean;
   /** The last `doctor` run, or null if it has not been run yet. */
@@ -60,6 +61,8 @@ interface DaemonActions {
   init: () => Promise<() => void>;
   refresh: () => Promise<void>;
   connect: (host: string) => Promise<void>;
+  /** Asks the OS for the input permission, showing its own prompt. */
+  requestPermission: () => Promise<void>;
   disconnect: (host: string) => Promise<void>;
   accept: (selector: string) => Promise<void>;
   reject: (selector: string) => Promise<void>;
@@ -78,11 +81,10 @@ interface DaemonActions {
 const initialState: DaemonState = {
   connection: "connecting",
   status: null,
-  peers: [],
-  placements: [],
-  swaps: [],
   daemonVersion: "",
   appVersion: "",
+  localAddress: null,
+  connecting: [],
   embedded: false,
   checks: null,
   log: null,
@@ -126,29 +128,15 @@ export function health(checks: CheckInfo[] | null): Health {
 }
 
 export const useDaemonStore = create<DaemonState & DaemonActions>()((set, get) => {
-  /** Peers, placements and modifier swaps do not travel in the status snapshot,
-   *  so they are read separately whenever the daemon says something changed. */
-  const loadPeerSettings = async () => {
-    try {
-      const [peers, placements, swaps] = await Promise.all([
-        daemon.peers(),
-        daemon.layout(),
-        daemon.modifiers(),
-      ]);
-      set({ peers, placements, swaps });
-    } catch {
-      // A daemon that went away is already reported by the status path; there is
-      // nothing extra to tell the user here.
-    }
-  };
-
-  /** Sends a command, then re-reads the daemon. On failure the local state is
-   *  left untouched, so the UI keeps showing what the daemon last confirmed. */
+  /** Sends a command and waits for the daemon to push a fresh snapshot through
+   *  the subscription. The snapshot is the source of truth: it now carries peers,
+   *  placements, and modifier swaps, so there is no second round trip to fetch
+   *  them. On failure the local state is left untouched, so the UI keeps showing
+   *  what the daemon last confirmed. */
   const run = async (command: () => Promise<void>) => {
     try {
       await command();
       set({ error: null });
-      await get().refresh();
     } catch (error) {
       set({ error: errorMessage(error) });
     }
@@ -158,13 +146,25 @@ export const useDaemonStore = create<DaemonState & DaemonActions>()((set, get) =
     ...initialState,
 
     init: async () => {
+      // The snapshot the daemon pushes carries everything the UI shows: sessions,
+      // pending, peers, placements, and modifier swaps. Replacing state from it
+      // means the UI never runs ahead of the daemon, and no command needs a
+      // follow-up fetch to stay consistent.
       const unlistenStatus = await listen<StatusInfo>(STATUS_EVENT, (event) => {
         set({ status: event.payload, connection: "connected", error: null });
-        void loadPeerSettings();
       });
 
       const unlistenDropped = await listen(DISCONNECTED_EVENT, () => {
-        set({ connection: "disconnected" });
+        // The subscription drops every second while the daemon is absent, which
+        // is noise — not a state change the user needs to see. Only report a
+        // drop when we actually had something to lose: a connected or
+        // incompatible session. A `connecting` state (e.g. `startDaemon` in
+        // flight) is left alone, so the user does not see a flicker to
+        // "disconnected" while the daemon is still coming up.
+        const current = get().connection;
+        if (current === "connected" || current === "incompatible") {
+          set({ connection: "disconnected" });
+        }
       });
 
       // The embedded daemon ending is not the same as losing touch with one: it
@@ -181,6 +181,11 @@ export const useDaemonStore = create<DaemonState & DaemonActions>()((set, get) =
         set({ appVersion: await installation.version() });
       } catch {
         // Leaves the version blank rather than blocking the whole window.
+      }
+      try {
+        set({ localAddress: await installation.localAddress() });
+      } catch {
+        // A machine with no network still runs; the pane just shows nothing.
       }
       // Run once at startup so the sidebar can flag a problem without the user
       // having to go looking for one. They are local permission queries and a
@@ -215,13 +220,40 @@ export const useDaemonStore = create<DaemonState & DaemonActions>()((set, get) =
           daemonVersion: version.daemon_version,
           error: null,
         });
-        await loadPeerSettings();
       } catch (error) {
         set({ connection: "disconnected", status: null, error: errorMessage(error) });
       }
     },
 
-    connect: (host) => run(() => daemon.connect(host)),
+    /** Dialling a peer waits on a human at the other end, so it can take a
+     *  while and has to look like it is doing something. The host is held in
+     *  `connecting` until the daemon reports a session with it, or it fails. */
+    connect: async (host) => {
+      set((s) => ({ connecting: [...s.connecting, host], error: null }));
+      try {
+        await daemon.connect(host);
+        // A refresh here keeps the snapshot honest: the connection request
+        // may be answered on the other end within this call, and the pushed
+        // snapshot arrives whenever it arrives. Re-reading once means the
+        // window is not left guessing between the click and the push.
+        await get().refresh();
+      } catch (error) {
+        set({ error: errorMessage(error) });
+      } finally {
+        set((s) => ({ connecting: s.connecting.filter((h) => h !== host) }));
+      }
+    },
+
+    requestPermission: async () => {
+      try {
+        await daemon.requestPermission();
+        // The answer lands in the OS, not here, so re-run the checks: they are
+        // what will show it once the daemon has been restarted.
+        await get().runDoctor();
+      } catch (error) {
+        set({ error: errorMessage(error) });
+      }
+    },
     disconnect: (host) => run(() => daemon.disconnect(host)),
     accept: (selector) => run(() => daemon.accept(selector)),
     reject: (selector) => run(() => daemon.reject(selector)),
@@ -263,9 +295,6 @@ export const useDaemonStore = create<DaemonState & DaemonActions>()((set, get) =
         set({
           connection: "disconnected",
           status: null,
-          peers: [],
-          placements: [],
-          swaps: [],
           error: null,
         });
         void get().runDoctor();
@@ -304,19 +333,25 @@ export const useDaemonStore = create<DaemonState & DaemonActions>()((set, get) =
  * Selector hooks. Subscribing to one slice keeps a component from re-rendering on
  * every unrelated snapshot — which matters, because the daemon pushes a fresh full
  * snapshot on every change.
+ *
+ * Peers, placements, and modifier swaps now live inside the status snapshot, so the
+ * hooks read them there with a stable empty-list fallback for the moment before the
+ * first snapshot arrives.
  */
 
 const EMPTY_SESSIONS: SessionInfo[] = [];
 const EMPTY_PENDING: PendingInfo[] = [];
+const EMPTY_PEERS: PeerInfo[] = [];
+const EMPTY_PLACEMENTS: LayoutInfo[] = [];
+const EMPTY_SWAPS: ModifierInfo[] = [];
 
 export const useConnection = (): ConnectionState => useDaemonStore((s) => s.connection);
 export const useStatus = (): StatusInfo | null => useDaemonStore((s) => s.status);
-export const usePeers = (): PeerInfo[] => useDaemonStore((s) => s.peers);
-export const usePlacements = (): LayoutInfo[] => useDaemonStore((s) => s.placements);
-export const useSwaps = (): ModifierInfo[] => useDaemonStore((s) => s.swaps);
 export const useDaemonError = (): string | null => useDaemonStore((s) => s.error);
 export const useDaemonVersion = (): string => useDaemonStore((s) => s.daemonVersion);
 export const useAppVersion = (): string => useDaemonStore((s) => s.appVersion);
+export const useLocalAddress = (): string | null => useDaemonStore((s) => s.localAddress);
+export const useConnecting = (): string[] => useDaemonStore((s) => s.connecting);
 export const useEmbedded = (): boolean => useDaemonStore((s) => s.embedded);
 export const useChecks = (): CheckInfo[] | null => useDaemonStore((s) => s.checks);
 
@@ -330,6 +365,15 @@ export const useSessions = (): SessionInfo[] =>
 
 export const usePending = (): PendingInfo[] =>
   useDaemonStore((s) => s.status?.pending ?? EMPTY_PENDING);
+
+export const usePeers = (): PeerInfo[] =>
+  useDaemonStore((s) => s.status?.peers ?? EMPTY_PEERS);
+
+export const usePlacements = (): LayoutInfo[] =>
+  useDaemonStore((s) => s.status?.placements ?? EMPTY_PLACEMENTS);
+
+export const useSwaps = (): ModifierInfo[] =>
+  useDaemonStore((s) => s.status?.modifier_swaps ?? EMPTY_SWAPS);
 
 export const useClipboardSharing = (): boolean =>
   useDaemonStore((s) => s.status?.clipboard_sharing ?? false);

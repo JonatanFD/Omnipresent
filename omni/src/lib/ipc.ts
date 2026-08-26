@@ -71,6 +71,14 @@ export interface StatusInfo {
   clipboard_sharing: boolean;
   sessions: SessionInfo[];
   pending: PendingInfo[];
+  /** Known peers (the trusted list, plus which are currently connected).
+   *  Included since protocol v1 as an additive field: a daemon built before it
+   *  omits the key, and an old app sees an empty list. */
+  peers: PeerInfo[];
+  /** Where each peer sits in the virtual desktop. Additive, same as `peers`. */
+  placements: LayoutInfo[];
+  /** How each peer's modifier keys are relabelled. Additive, same as `peers`. */
+  modifier_swaps: ModifierInfo[];
 }
 
 /** The daemon's version handshake. */
@@ -125,6 +133,8 @@ export const daemon = {
   doctor: () => invoke<CheckInfo[]>("daemon_doctor"),
   /** The tail of the daemon's log. */
   log: () => invoke<DaemonLog>("daemon_log"),
+  /** Asks the OS for the input permission, showing its own prompt. */
+  requestPermission: () => invoke<boolean>("request_input_permission"),
 
   connect: (host: string) => invoke<void>("peer_connect", { host }),
   disconnect: (host: string) => invoke<void>("peer_disconnect", { host }),
@@ -147,6 +157,8 @@ export const daemon = {
 /** This installation. Everything else lives inside the app itself. */
 export const installation = {
   version: () => invoke<string>("app_version"),
+  /** This machine's address on the local network, for a peer to dial. */
+  localAddress: () => invoke<string | null>("local_address"),
 };
 
 /** Turns whatever `invoke` rejected with into something showable. */

@@ -67,6 +67,38 @@ impl std::error::Error for MacosInputError {}
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXIsProcessTrusted() -> u8;
+    /// The same question, but able to show the system's own prompt. The
+    /// options dictionary carries `AXTrustedCheckOptionPrompt`.
+    fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> u8;
+}
+
+/// Asks for the Accessibility permission, showing the system prompt.
+///
+/// Checking and asking are different calls, and a window that knows the
+/// permission is missing should put macOS's own dialog in front of the user
+/// rather than describe a settings pane and leave them to find it.
+///
+/// Returns whether it is *already* granted. The answer to the prompt never
+/// arrives here: macOS records it against the responsible app and the process
+/// has to be restarted before a tap can be created, so the caller's job is to
+/// ask and then tell the user to stop and start the daemon.
+///
+/// Harmless when already granted — macOS shows nothing — and it will not nag,
+/// because the system suppresses a repeat prompt for a process that has been
+/// answered once.
+pub fn request_input_permission() -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFString;
+
+    // The key is exported as a CFStringRef symbol, but its value is documented
+    // and stable, and naming it directly avoids another extern declaration.
+    let prompt = CFString::from_static_string("AXTrustedCheckOptionPrompt");
+    let options = CFDictionary::from_CFType_pairs(&[(prompt, CFBoolean::true_value())]);
+
+    // Safety: the dictionary outlives the call, and the function only reads it.
+    unsafe { AXIsProcessTrustedWithOptions(options.as_CFTypeRef() as *const _) != 0 }
 }
 
 /// Reports whether the OS permissions capture and injection need are granted.

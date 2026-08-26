@@ -168,8 +168,12 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
 /// being cut off mid-flight. A daemon that was already running when the app
 /// started is left alone: this app never started it, so it is not its to stop.
 fn quit<R: Runtime>(app: &AppHandle<R>) {
-    if app.state::<Supervisor>().is_embedded() {
-        let _ = request(Request::Stop);
+    let supervisor = app.state::<Supervisor>();
+    if supervisor.is_embedded() {
+        // Waits for the daemon to actually be gone, so it closes its sessions
+        // and releases its socket rather than being cut off by the process
+        // exiting out from under it.
+        crate::daemon::stop_quietly(&supervisor);
     }
     app.exit(0);
 }

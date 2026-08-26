@@ -12,7 +12,9 @@
 mod daemon;
 mod diagnostics;
 mod ipc;
+mod network;
 mod notify;
+mod permissions;
 mod tray;
 
 use tauri::{Manager, WindowEvent};
@@ -63,12 +65,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_version,
             daemon::daemon_start,
+            daemon::daemon_stop,
             daemon::daemon_embedded,
+            network::local_address,
+            permissions::request_input_permission,
             diagnostics::daemon_doctor,
             diagnostics::daemon_log,
             ipc::daemon_status,
             ipc::daemon_hello,
-            ipc::daemon_stop,
             ipc::peer_connect,
             ipc::peer_disconnect,
             ipc::peer_accept,
