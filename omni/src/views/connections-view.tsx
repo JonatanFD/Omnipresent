@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Radio, Unplug } from "lucide-react";
+import { LoaderCircle, Radio, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -25,6 +25,7 @@ import {
   usePlacements,
   useSessions,
   useSwaps,
+  useConnecting,
 } from "@/stores/daemon-store";
 
 /**
@@ -70,6 +71,7 @@ export function ConnectionsView() {
 
 function ConnectSection() {
   const [host, setHost] = useState("");
+  const connecting = useConnecting();
   const connect = useDaemonStore((s) => s.connect);
 
   const submit = () => {
@@ -95,11 +97,27 @@ function ConnectSection() {
             placeholder="Host or IP address"
             aria-label="Host or IP address"
           />
-          <Button type="submit" disabled={!host.trim()}>
+          <Button type="submit" disabled={!host.trim() || connecting.length > 0}>
             Connect
           </Button>
         </form>
       </SettingsStack>
+
+      {/* Dialling waits on a person at the other end pressing Accept, which can
+          take as long as it takes. Without this the window looked like it had
+          ignored the click. */}
+      {connecting.map((host) => (
+        <SettingsRow
+          key={host}
+          label={
+            <span className="flex items-center gap-2">
+              <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" />
+              {host}
+            </span>
+          }
+          description="Waiting for the other machine to accept. It may be showing a prompt."
+        />
+      ))}
     </SettingsSection>
   );
 }

@@ -1717,14 +1717,14 @@ fn decide_pending(shared: &Arc<Shared>, selector: &str, approve: bool) -> Respon
 }
 
 fn status(shared: &Arc<Shared>) -> StatusInfo {
-    let state = shared.lock();
-    let active = state.sessions.active_target();
-    StatusInfo {
-        fingerprint: shared.local_fingerprint.to_string(),
-        port: shared.port,
-        capturing: shared.capturing.load(std::sync::atomic::Ordering::Relaxed),
-        clipboard_sharing: shared.clipboard.is_enabled(),
-        sessions: state
+    // One pass through the state lock, gathering everything the snapshot
+    // carries. Holding the lock only for as long as it takes to read shared
+    // state keeps a subscriber's push cheap even while a command is mutating.
+    let (sessions, pending, placements, modifier_swaps, connected_fingerprints) = {
+        let state = shared.lock();
+        let active = state.sessions.active_target();
+
+        let sessions = state
             .links
             .values()
             .map(|link| SessionInfo {
@@ -1736,15 +1736,93 @@ fn status(shared: &Arc<Shared>) -> StatusInfo {
                 },
                 active: active == ActiveTarget::Remote(machine_id_of(link.fingerprint)),
             })
-            .collect(),
-        pending: state
+            .collect::<Vec<_>>();
+
+        let pending = state
             .pending
             .iter()
             .map(|p| PendingInfo {
                 host: p.host.clone(),
                 fingerprint: p.fingerprint.to_string(),
             })
-            .collect(),
+            .collect::<Vec<_>>();
+
+        let mut all_placements = Vec::with_capacity(state.links.len() + state.placements.len());
+        let mut seen = std::collections::HashSet::new();
+        for link in state.links.values() {
+            seen.insert(link.host.clone());
+            all_placements.push(LayoutInfo {
+                host: link.host.clone(),
+                edge: edge_name(link.edge).to_string(),
+                connected: true,
+            });
+        }
+        for (host, edge) in &state.placements {
+            if seen.contains(host) {
+                continue;
+            }
+            all_placements.push(LayoutInfo {
+                host: host.clone(),
+                edge: edge_name(*edge).to_string(),
+                connected: false,
+            });
+        }
+        all_placements.sort_by(|a, b| a.host.cmp(&b.host));
+
+        let mut all_swaps = Vec::with_capacity(state.links.len() + state.modifier_swaps.len());
+        seen.clear();
+        for link in state.links.values() {
+            seen.insert(link.host.clone());
+            all_swaps.push(ModifierInfo {
+                host: link.host.clone(),
+                swap: link.modifier_swap.name().to_string(),
+                connected: true,
+            });
+        }
+        for (host, swap) in &state.modifier_swaps {
+            if seen.contains(host) {
+                continue;
+            }
+            all_swaps.push(ModifierInfo {
+                host: host.clone(),
+                swap: swap.name().to_string(),
+                connected: false,
+            });
+        }
+        all_swaps.sort_by(|a, b| a.host.cmp(&b.host));
+
+        let connected_fingerprints = state
+            .links
+            .values()
+            .map(|l| l.fingerprint.to_string())
+            .collect::<Vec<_>>();
+
+        (sessions, pending, all_placements, all_swaps, connected_fingerprints)
+    };
+
+    // The trusted-peer list lives behind a separate lock; reading it outside the
+    // state lock avoids ordering it against any caller that takes both.
+    let peers = shared
+        .trust
+        .peers()
+        .into_iter()
+        .map(|record| PeerInfo {
+            connected: connected_fingerprints.contains(&record.fingerprint),
+            host: record.host,
+            fingerprint: record.fingerprint,
+        })
+        .collect();
+
+    StatusInfo {
+        fingerprint: shared.local_fingerprint.to_string(),
+        port: shared.port,
+        capturing: shared.capturing.load(std::sync::atomic::Ordering::Relaxed),
+        clipboard_sharing: shared.clipboard.is_enabled(),
+        sessions,
+        pending,
+        peers,
+        placements,
+        modifier_swaps,
     }
 }
 

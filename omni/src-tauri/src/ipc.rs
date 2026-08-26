@@ -31,10 +31,18 @@ pub const DISCONNECTED_EVENT: &str = "daemon://disconnected";
 ///
 /// Visible to the crate because the tray answers connection requests too: a
 /// waiting peer has to be acceptable without reopening the window.
+///
+/// A read deadline guards against a daemon that accepted the connection but
+/// stopped responding: without it, a wedged daemon would leave the window
+/// spinning forever on a command that will never come back.
 pub(crate) fn request(req: Request) -> Result<Response, String> {
     let paths = Paths::resolve().map_err(|e| e.to_string())?;
     let mut stream =
         connect_blocking(&paths).map_err(|_| "the daemon is not running".to_string())?;
+
+    // Cap how long we wait for an answer. The daemon answers every request in
+    // well under a second; anything longer means it is stuck or gone.
+    set_read_deadline(&stream, READ_TIMEOUT);
 
     let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
     line.push('\n');
@@ -56,6 +64,27 @@ pub(crate) fn request(req: Request) -> Result<Response, String> {
         return Err(message);
     }
     Ok(response)
+}
+
+/// How long `request` waits for the daemon to answer before giving up.
+const READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Applies a read deadline to the IPC stream, where the platform allows it.
+/// Unix-domain sockets support `set_read_timeout`; a Windows named pipe opened
+/// as a file does not, so there the deadline is a best-effort no-op.
+#[cfg(unix)]
+fn set_read_deadline(stream: &omni_runtime::ipc_transport::IpcClient, timeout: Duration) {
+    // `set_read_timeout` on a blocking Unix socket is safe and takes effect on
+    // the next `read`.
+    let _ = stream.set_read_timeout(Some(timeout));
+}
+
+#[cfg(windows)]
+fn set_read_deadline(_stream: &omni_runtime::ipc_transport::IpcClient, _timeout: Duration) {
+    // A named pipe opened as `std::fs::File` has no per-handle read timeout.
+    // The daemon answers promptly in practice; a wedged daemon is rare enough
+    // that blocking here is the lesser evil than pulling in overlapped I/O for
+    // every one-shot CLI call.
 }
 
 /// Rejects a response that is not the variant the caller asked for.
@@ -97,11 +126,6 @@ pub struct DaemonVersion {
     pub daemon_version: String,
     /// False when the daemon is newer than this app understands.
     pub compatible: bool,
-}
-
-#[tauri::command]
-pub fn daemon_stop() -> Result<(), String> {
-    request(Request::Stop).map(|_| ())
 }
 
 #[tauri::command]
@@ -292,6 +316,9 @@ mod tests {
                     fingerprint: (*fingerprint).to_string(),
                 })
                 .collect(),
+            peers: Vec::new(),
+            placements: Vec::new(),
+            modifier_swaps: Vec::new(),
         }
     }
 

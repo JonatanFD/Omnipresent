@@ -121,6 +121,19 @@ pub struct StatusInfo {
     pub sessions: Vec<SessionInfo>,
     /// Incoming requests awaiting `omni accept` / `omni reject`.
     pub pending: Vec<PendingInfo>,
+    /// Known peers (the trusted list, plus which are currently connected).
+    /// Included in the snapshot so a client needs no extra round trip after a
+    /// `Request::Subscribe` — the whole view is one message.
+    #[serde(default)]
+    pub peers: Vec<PeerInfo>,
+    /// Where each peer sits in the virtual desktop. Included in the snapshot
+    /// for the same reason as `peers`.
+    #[serde(default)]
+    pub placements: Vec<LayoutInfo>,
+    /// How each peer's modifier keys are relabelled. Included in the snapshot
+    /// for the same reason as `peers`.
+    #[serde(default)]
+    pub modifier_swaps: Vec<ModifierInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +211,9 @@ mod tests {
                 active: true,
             }],
             pending: vec![],
+            peers: vec![],
+            placements: vec![],
+            modifier_swaps: vec![],
         });
         let line = serde_json::to_string(&response).unwrap();
         let back: Response = serde_json::from_str(&line).unwrap();
@@ -236,11 +252,27 @@ mod tests {
             clipboard_sharing: false,
             sessions: vec![],
             pending: vec![],
+            peers: vec![],
+            placements: vec![],
+            modifier_swaps: vec![],
         });
         let line = serde_json::to_string(&event).unwrap();
         assert!(!line.contains('\n'));
         // The `event` tag is what lets a subscriber tell a push from a response.
         assert!(line.contains("\"event\":\"status\""));
         assert_eq!(serde_json::from_str::<Event>(&line).unwrap(), event);
+    }
+
+    #[test]
+    fn an_old_snapshot_without_the_new_fields_still_deserialises() {
+        // A daemon built before `peers`, `placements`, and `modifier_swaps` were
+        // part of the snapshot omits them. The `#[serde(default)]` on each keeps
+        // a newer client working against it: it just sees empty lists.
+        let old = r#"{"event":"status","fingerprint":"ab","port":4733,"capturing":true,"clipboard_sharing":false,"sessions":[],"pending":[]}"#;
+        let event = serde_json::from_str::<Event>(old).expect("old snapshot deserialises");
+        let Event::Status(status) = event;
+        assert!(status.peers.is_empty());
+        assert!(status.placements.is_empty());
+        assert!(status.modifier_swaps.is_empty());
     }
 }

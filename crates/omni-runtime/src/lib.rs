@@ -32,3 +32,22 @@ pub use daemon::{DaemonError, run, run_with_paths};
 pub fn prepare_process() {
     omni_input::platform::prepare_process();
 }
+
+/// Asks the OS for the permission capture and injection need, showing the
+/// system's own prompt where there is one. Returns whether it is *already*
+/// granted.
+///
+/// Only macOS has something to ask for. Windows needs no permission for
+/// ordinary windows, and Linux is group membership and a udev rule — neither is
+/// something a running process can prompt for, so both answer "granted" and
+/// leave `doctor` to report what is actually missing.
+pub fn request_input_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        omni_input::platform::request_input_permission()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}

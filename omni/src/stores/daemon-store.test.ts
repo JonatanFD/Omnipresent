@@ -36,6 +36,9 @@ const STATUS = {
   clipboard_sharing: false,
   sessions: [],
   pending: [],
+  peers: [],
+  placements: [],
+  modifier_swaps: [],
 };
 
 /** The answers a healthy daemon gives. */
@@ -133,6 +136,38 @@ describe("commands", () => {
   });
 });
 
+describe("connecting", () => {
+  it("shows the host as in flight while the daemon is dialling", async () => {
+    // The peer has to press Accept, which can take as long as it takes. Without
+    // a record of the attempt the window looks like it ignored the click.
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = answers.peer_connect;
+    answers.peer_connect = gate;
+
+    const dialling = useDaemonStore.getState().connect("studio");
+    expect(useDaemonStore.getState().connecting).toEqual(["studio"]);
+
+    release?.();
+    await dialling;
+    answers.peer_connect = original;
+
+    expect(useDaemonStore.getState().connecting).toEqual([]);
+  });
+
+  it("clears the host again when dialling fails", async () => {
+    // A spinner that never stops is worse than no spinner.
+    failures.peer_connect = "no route to host";
+
+    await useDaemonStore.getState().connect("studio");
+
+    expect(useDaemonStore.getState().connecting).toEqual([]);
+    expect(useDaemonStore.getState().error).toBe("no route to host");
+  });
+});
+
 describe("start and stop", () => {
   it("can start the daemon again after stopping it", async () => {
     // The whole point of the supervisor: Stop used to be a one-way door, and the
@@ -148,17 +183,21 @@ describe("start and stop", () => {
   });
 
   it("forgets peers and placements when the daemon stops", async () => {
-    answers.peer_list = [{ host: "studio", fingerprint: "aa", connected: true }];
-    answers.layout_list = [{ host: "studio", edge: "right", connected: true }];
-    answers.modifiers_list = [{ host: "studio", swap: "none", connected: true }];
+    answers.daemon_status = {
+      ...STATUS,
+      peers: [{ host: "studio", fingerprint: "aa", connected: true }],
+      placements: [{ host: "studio", edge: "right", connected: true }],
+      modifier_swaps: [{ host: "studio", swap: "none", connected: true }],
+    };
     await useDaemonStore.getState().refresh();
 
     await useDaemonStore.getState().stopDaemon();
 
+    // Stopping clears the whole snapshot — peers, placements, and modifier
+    // swaps live inside it now, so dropping `status` drops them too. The
+    // selectors fall back to empty lists when there is no snapshot.
     const state = useDaemonStore.getState();
-    expect(state.peers).toEqual([]);
-    expect(state.placements).toEqual([]);
-    expect(state.swaps).toEqual([]);
+    expect(state.status).toBeNull();
   });
 
   it("surfaces a daemon that refuses to start", async () => {
