@@ -80,6 +80,15 @@ Packaging:
 bun run tauri build
 ```
 
+On macOS, re-sign the bundle so the Accessibility permission survives a
+rebuild — `tauri build` leaves the linker's ad-hoc signature, whose
+identifier changes every build, and macOS TCC tracks the permission by
+that identifier:
+
+```sh
+bun run sign:macos      # re-signs with the stable identifier com.jonatanfd.omni
+```
+
 ## Where things are
 
 | Path | What it is |

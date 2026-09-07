@@ -756,6 +756,27 @@ Everything below is known, deliberate, and ordered roughly by importance:
   backends are not enabled or exercised — wiring and verifying Linux clipboard
   (text and image) is the remaining clipboard work.
 
+## Planned: symmetric cursor hiding
+
+Today only the **Controller** hides its cursor while input is routed to a peer
+(`sync_suppression` sets `suppress = true` when `active_target == Remote`). The
+machine being driven — the **Target** — keeps its cursor visible the whole
+time, and on **Windows** even the Controller does not truly hide it: it parks
+the pointer at the screen centre instead of calling `SetSystemCursor`, because
+that API is global and would leave the whole OS without a cursor if the daemon
+crashed while suppressed.
+
+The goal is the KVM feel: the cursor disappears on whichever machine is not
+holding it. Two pieces:
+
+- **Windows cursor hiding** — find a non-global, process-scoped way to hide the
+  cursor (or restore it on crash), so the Controller on Windows actually hides
+  like macOS and Linux already do.
+- **Target-side hiding** — the Target hides its own cursor while a peer is
+  driving it, and shows it again on `CursorReturned`. This needs a control
+  signal (or reusing `CursorWarp` / `CursorReturned`) so the Target knows when
+  to hide and show, since its `active_target` stays `Local`.
+
 ## Planned: native GUI clients
 
 A native **macOS** (Swift/SwiftUI) and **Windows** (C#/WinUI 3) GUI are planned,

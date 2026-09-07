@@ -19,6 +19,7 @@ The system utilizes a ports-and-adapters architecture:
 | 3 | `omni-clipboard` Crate | Crate design, TDD test cases, arboard adapter. | None | DONE |
 | 4 | Clipboard Daemon Wiring | Config flags, QUIC control stream integration. | M3 | DONE |
 | 5 | Integration Verification | Compile check, clippy, tests, layout verification. | M1, M2, M4 | DONE |
+| 6 | Symmetric Cursor Hiding | Hide the cursor on the machine not holding it (Controller hides when sending input to a peer; Windows currently parks instead of hiding). Covers the Windows gap and any Target-side hiding if needed. | M1 | PLANNED |
 
 ## Interface Contracts
 ### `omni-clipboard` ↔ `omni-runtime`

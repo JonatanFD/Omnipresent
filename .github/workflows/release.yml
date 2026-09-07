@@ -85,6 +85,17 @@ jobs:
         working-directory: omni
         run: bun run tauri build --target ${{ matrix.target }}
 
+      # Re-sign the macOS bundle so the Accessibility permission survives a
+      # rebuild. tauri build leaves the linker's ad-hoc signature, whose
+      # identifier (a hash) changes every build; macOS TCC tracks the permission
+      # by that identifier, so without this a rebuild silently revokes it and
+      # `AXIsProcessTrusted()` returns false even though the app still appears
+      # in System Settings → Accessibility. The script is a no-op off macOS.
+      - name: Stabilize macOS code signature
+        if: runner.os == 'macOS'
+        working-directory: omni
+        run: bun run sign:macos
+
       - name: Build the CLI
         run: cargo build --release --locked --bin omni --target ${{ matrix.target }}
 
