@@ -12,7 +12,7 @@
     "sync-version": "node scripts/version.mjs --write",
     "test": "vitest run",
     "test:watch": "vitest",
-    "sign:macos": "node scripts/sign-macos.mjs",
+    "verify:macos": "node scripts/verify-macos.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

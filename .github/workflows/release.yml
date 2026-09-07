@@ -85,17 +85,6 @@ jobs:
         working-directory: omni
         run: bun run tauri build --target ${{ matrix.target }}
 
-      # Re-sign the macOS bundle so the Accessibility permission survives a
-      # rebuild. tauri build leaves the linker's ad-hoc signature, whose
-      # identifier (a hash) changes every build; macOS TCC tracks the permission
-      # by that identifier, so without this a rebuild silently revokes it and
-      # `AXIsProcessTrusted()` returns false even though the app still appears
-      # in System Settings → Accessibility. The script is a no-op off macOS.
-      - name: Stabilize macOS code signature
-        if: runner.os == 'macOS'
-        working-directory: omni
-        run: bun run sign:macos
-
       - name: Build the CLI
         run: cargo build --release --locked --bin omni --target ${{ matrix.target }}
 
@@ -117,6 +106,21 @@ jobs:
           else
             cp "$(find "$bundle/appimage" -name '*.AppImage' | head -1)" "omni-desktop-$name.AppImage"
           fi
+
+      # The .dmg must carry a valid bundle signature under the stable
+      # identifier, checked on the packaged asset rather than the intermediate
+      # .app — the bundle used to be re-signed *after* the .dmg had already
+      # been built from it, so every download shipped the linker's ad-hoc
+      # signature instead. That signature seals only the executable, which
+      # Gatekeeper rejects on a quarantined app as "damaged and can't be
+      # opened", and its identifier is a per-build hash, which makes macOS
+      # revoke the Accessibility permission on every update. Tauri now signs
+      # the bundle before packaging it (`bundle.macOS.signingIdentity`); this
+      # is the check that it actually happened.
+      - name: Verify the macOS signature
+        if: matrix.os == 'macos'
+        working-directory: omni
+        run: bun run verify:macos ../omni-desktop-${{ matrix.os }}-${{ matrix.arch }}.dmg
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
