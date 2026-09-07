@@ -1797,7 +1797,13 @@ fn status(shared: &Arc<Shared>) -> StatusInfo {
             .map(|l| l.fingerprint.to_string())
             .collect::<Vec<_>>();
 
-        (sessions, pending, all_placements, all_swaps, connected_fingerprints)
+        (
+            sessions,
+            pending,
+            all_placements,
+            all_swaps,
+            connected_fingerprints,
+        )
     };
 
     // The trusted-peer list lives behind a separate lock; reading it outside the

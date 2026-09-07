@@ -76,7 +76,9 @@ fn temp_paths_on_port(name: &str, port: u16) -> Paths {
     let dir = std::env::temp_dir().join(format!("omni-r{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let paths = Paths::at(dir);
-    paths.ensure().expect("the temp state directory was created");
+    paths
+        .ensure()
+        .expect("the temp state directory was created");
     std::fs::write(paths.config_file(), format!(r#"{{"port":{port}}}"#))
         .expect("the port was written");
     paths
